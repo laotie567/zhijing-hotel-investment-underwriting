@@ -19,7 +19,7 @@ python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
 | 引擎/Profile | 适用证据 | Mac Mini 预检与动作 |
 |---|---|---|
 | `playwright` / `360-map-v1` | 2km 全量地图候选、公开房型/图片 | 在 `collector/` 执行 `npm ci && npx playwright install chromium`。 |
-| `ego-browser` / `ctrip-hotel-v1` | 已登录 OTA 的房型、可订状态、同条件价格、页面图片 | 安装 **Ego Lite**（不是 Eagle），确认 `ego-browser` 命令可用；在 Ego Lite 登录获授权 OTA 后重跑。安装指南：<https://lite.ego.app/document/zh/docs/quick-start>。 |
+| `ego-browser` / `ctrip-hotel-v1` | 已登录 OTA 的房型、可订状态、同条件 **P1 页面价格**、酒店/房型图片 | 安装 **Ego Lite**（不是 Eagle），确认 `ego-browser` 命令可用；在 Ego Lite 登录获授权 OTA 后重跑。P1 会交付到 HTML/Base，但不进入 ADR。安装指南：<https://lite.ego.app/document/zh/docs/quick-start>。 |
 | `ctrip-live-rates` / `ctrip-live-rates-v1` | 携程 P1/P2 页面价格、库存、房型、公开图片与 Network/DOM 双证据 | 安装 Google Chrome、OpenCLI Browser Bridge、Ui.Vision 与 `uivision-mcp-bridge@1.1.1`；创建专用 `ctrip-price-worker` Profile 并人工登录携程、完成 Ui.Vision 本机配对。 |
 | `kimi-webbridge` | 真实浏览器会话的替代页面适配器 | 安装并连接 Kimi WebBridge 浏览器扩展，设置 `MARKET_EVIDENCE_KIMI_WEBBRIDGE_COMMAND`。若预检提示缺失，按 <https://kimi.com/features/webbridge> 安装/连接。 |
 | `crawl4ai` / `xcrawl` / `opencli` | 经批准的静态页、检索或补采适配器 | 安装批准实现，并设置相应 `MARKET_EVIDENCE_*_COMMAND`。 |
@@ -44,9 +44,10 @@ python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
 由已配置的 Kimi WebBridge/crawl4ai/xcrawl/OpenCLI 页面适配器建立，但必须回传同一
 字段。
 
-`ctrip-hotel-v1` 只会在页面同时显示房型、可订、价格、税费口径、取消政策和完全相同
-的 `pricing_context` 时，把它写入 `room_offers`。未登录显示“登录看低价”、验证码、
-售罄或页面字段缺失都会产生 `partial`；不会用列表价替代。
+`ctrip-hotel-v1` 在页面同时回显房型、可订、最终展示价、取消文案和完全相同的
+`pricing_context` 时，写入 P1 `pricing_observations`。P1 是真实的 DOM 页面证据，但该
+Profile 不读取 Network 载荷，也不猜测税费口径或机位数，因此永远不写入 `room_offers` 或
+ADR。未登录显示“登录看低价”、验证码、售罄或页面字段缺失都会产生 `partial`；不会用列表价替代。
 
 ### 携程实时价 Worker
 

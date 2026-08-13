@@ -115,47 +115,105 @@ function extractPageFacts(maxImages) {
     const compact = (value, maximum = 2000) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, maximum);
     const rawBody = String(document.body && document.body.innerText || '').slice(0, 120000);
     const body = compact(rawBody, 120000);
+    const imageContext = (image) => [
+      image.alt,
+      image.className,
+      image.parentElement && image.parentElement.className,
+      image.parentElement && image.parentElement.parentElement && image.parentElement.parentElement.className,
+    ].map((value) => String(value || '')).join(' ');
     const allImages = [...document.images]
       .map((image) => ({
         url: compact(image.currentSrc || image.src || image.getAttribute('data-src') || image.getAttribute('data-original'), 4000),
         width: Number(image.naturalWidth || image.width || 0),
         height: Number(image.naturalHeight || image.height || 0),
         alt: compact(image.alt, 240),
+        context: imageContext(image),
       }))
-      .filter((image) => image.url.startsWith('http') && image.width >= 160 && image.height >= 100);
+      // Only use an explicitly hotel/room-gallery image. In particular, do not
+      // let a logged-in account avatar become competitor visual evidence.
+      .filter((image) => image.url.startsWith('http') && image.width >= 160 && image.height >= 100)
+      .filter((image) => /photo\s*gallery|hotel\s*overview|酒店|房型|客房|room|gallery|album/i.test(image.context))
+      .filter((image) => !/avatar|logo|qrcode|二维码/i.test(image.context));
     const seenImages = new Set();
     const images = allImages.filter((image) => !seenImages.has(image.url) && seenImages.add(image.url)).slice(0, ${maxImages});
-    const blocks = [...document.querySelectorAll('div,li,section,article')]
-      .map((element) => String(element.innerText || '').trim())
-      .filter((value) => value.includes('房') && /(￥|¥)\s*\d/.test(value) && value.length <= 1200);
-    const seenBlocks = new Set();
-    const offers = [];
-    for (const block of blocks) {
-      if (seenBlocks.has(block)) continue;
-      seenBlocks.add(block);
-      if (block.includes('登录看低价')) continue;
-      const priceMatches = [...block.matchAll(/(?:￥|¥)\s*([0-9][0-9,]*)/g)].map((match) => Number(match[1].replace(/,/g, ''))).filter(Number.isFinite);
-      const roomLines = block.split(/\n/).map((line) => compact(line, 240)).filter((line) => line.includes('房'));
-      const roomType = roomLines.find((line) => /电竞|大床|双床|套房|房/.test(line)) || '';
-      const availability = block.includes('已订完') ? 'sold_out' : (block.includes('可订') ? 'available' : 'unknown');
-      const taxIncluded = block.includes('含税') ? true : (block.includes('不含税') || block.includes('另付税费') ? false : null);
-      const cancellation = block.match(/(?:免费取消|不可取消|取消[^，。\n]{0,80})/)?.[0] || '';
-      const workstationMatch = block.match(/(\d+)\s*台电竞电脑|5台及以上电竞电脑/);
-      const workstations = workstationMatch ? (workstationMatch[0].startsWith('5台') ? 5 : Number(workstationMatch[1])) : null;
-      if (roomType && workstations && priceMatches.length === 1 && availability === 'available' && taxIncluded !== null && cancellation) {
-        offers.push({ room_type: roomType, workstations, nightly_price: priceMatches[0], availability, tax_included: taxIncluded, cancellation_policy: cancellation });
-      }
+    const roomPriceCards = [];
+    const seenPriceCards = new Set();
+    for (const card of [...document.querySelectorAll('div')]) {
+      const classTokens = String(card.className || '').split(/\s+/);
+      if (!classTokens.some((token) => /^commonRoomCard(?:Hidden)?__/.test(token))) continue;
+      const raw = String(card.innerText || '').trim();
+      if (!/(￥|¥)\s*\d/.test(raw) || !/预订|可订/.test(raw)) continue;
+      const title = card.querySelector('[class*="commonRoomCard-title"], [role="button"]');
+      const roomType = compact(title && title.innerText, 300);
+      const prices = [...raw.matchAll(/(?:￥|¥)\s*([0-9][0-9,]*)/g)]
+        .map((match) => Number(match[1].replace(/,/g, '')))
+        .filter((value) => Number.isFinite(value) && value > 0);
+      if (!roomType || !prices.length) continue;
+      const key = roomType + '|' + prices.at(-1);
+      if (seenPriceCards.has(key)) continue;
+      seenPriceCards.add(key);
+      roomPriceCards.push({
+        room_type: roomType,
+        display_price: prices.at(-1),
+        availability: /已订完|售罄|满房|不可订/.test(raw) ? 'sold_out' : 'available',
+        cancellation_policy: (raw.match(/(?:免费取消|不可取消|取消[^，。\n]{0,80})/) || [''])[0] || '',
+        text: compact(raw, 1800),
+      });
+      if (roomPriceCards.length >= 30) break;
     }
     const contextText = rawBody.replace(/\s+/g, '');
     return {
       title: document.title,
       has_login_price_gate: body.includes('登录看低价'),
       page_context_text: contextText.slice(0, 3000),
-      room_type_names: [...new Set(rawBody.split(/\n/).map((line) => compact(line, 240)).filter((line) => line.includes('房') && /电竞|大床|双床|套房/.test(line)))].slice(0, 24),
+      room_type_names: [...new Set([
+        ...roomPriceCards.map((card) => card.room_type),
+        ...rawBody.split(/\n/).map((line) => compact(line, 240)).filter((line) => line.includes('房') && /电竞|大床|双床|套房/.test(line)),
+      ])].slice(0, 30),
       images,
-      offers: offers.slice(0, 30),
+      room_price_cards: roomPriceCards,
     };
   })()`);
+}
+
+function pagePriceObservations(cards, pricingContext, sourceUrl, observedAt, propertyId) {
+  const observations = [];
+  const seen = new Set();
+  for (const [index, card] of (Array.isArray(cards) ? cards : []).entries()) {
+    const roomType = text(card && card.room_type, 300);
+    const displayPrice = Number(card && card.display_price);
+    if (!roomType || !Number.isFinite(displayPrice) || displayPrice <= 0) continue;
+    const key = `${roomType}|${displayPrice}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const raw = text(card && card.text, 1_800);
+    const workstations = (raw.match(/(\d+)\s*台(?:电竞)?(?:电脑|主机)/) || [])[1];
+    const availability = card && card.availability === "sold_out" ? "sold_out" : "available";
+    const cancellation = text(card && card.cancellation_policy, 240);
+    const qualificationGaps = ["network_evidence_missing", "tax_scope_unknown"];
+    if (availability !== "available") qualificationGaps.push("availability_not_confirmed");
+    if (!cancellation) qualificationGaps.push("cancellation_policy_missing");
+    if (!workstations) qualificationGaps.push("workstations_missing");
+    observations.push({
+      room_type: roomType,
+      room_type_provider_id: `${propertyId}:ego-dom:${index + 1}`,
+      price_type: "P1",
+      display_price: displayPrice,
+      currency: "CNY",
+      availability,
+      ...(cancellation ? { cancellation_policy: cancellation } : {}),
+      pricing_context: pricingContext,
+      source_url: sourceUrl,
+      observed_at: observedAt,
+      network_verified: false,
+      dom_verified: true,
+      price_match: false,
+      adr_eligible: false,
+      qualification_gaps: qualificationGaps,
+      ...(workstations ? { workstations: Number(workstations) } : {}),
+    });
+  }
+  return observations;
 }
 
 const raw = process.env.MARKET_EVIDENCE_REQUEST_JSON;
@@ -182,6 +240,7 @@ const gaps = [];
 let imageCount = 0;
 let roomTypeCount = 0;
 let pricedCandidateCount = 0;
+let observedPriceCandidateCount = 0;
 let embeddedBytes = 0;
 
 for (const item of selected) {
@@ -212,21 +271,22 @@ for (const item of selected) {
       page_title: text(facts.title, 300),
     }];
     roomTypeCount += Array.isArray(facts.room_type_names) ? facts.room_type_names.length : 0;
-    const offers = Array.isArray(facts.offers) ? facts.offers : [];
-    candidate.room_offers = (requestedContextVisible ? offers : []).map((offer, index) => ({
-      room_type: text(offer.room_type, 240),
-      room_type_provider_id: `${ota.property_id}:dom:${index + 1}`,
-      workstations: Number(offer.workstations),
-      nightly_price: Number(offer.nightly_price),
-      availability: offer.availability,
-      currency: "CNY",
-      tax_included: offer.tax_included,
-      cancellation_policy: text(offer.cancellation_policy, 240),
-      pricing_context: request.pricing_context,
-      source_url: bookingUrl,
-      observed_at: observedAt,
-    }));
+    const pricingObservations = requestedContextVisible
+      ? pagePriceObservations(
+        facts.room_price_cards,
+        request.pricing_context,
+        bookingUrl,
+        observedAt,
+        ota.property_id,
+      )
+      : [];
+    // P1 is an actual user-visible page price, but Ego intentionally does not
+    // inspect Network payloads. Preserve it for reports/Feishu, never promote
+    // it into ADR without the stricter P2 verifier.
+    candidate.room_offers = [];
+    candidate.pricing_observations = pricingObservations;
     if (candidate.room_offers.length) pricedCandidateCount += 1;
+    if (pricingObservations.length) observedPriceCandidateCount += 1;
     const images = [];
     for (const image of Array.isArray(facts.images) ? facts.images : []) {
       const collected = await fetchImage(image.url, pageSources, MAX_EMBEDDED_BYTES - embeddedBytes);
@@ -268,7 +328,12 @@ if (!inventory.length) gaps.push("Ego OTA Profile requires candidate_inventory f
 if (!selected.length && inventory.length) gaps.push("未选择任何价格/视觉标杆；请提供带 ota_property 的 benchmark_selected 候选");
 if (request.required_evidence.room_types && roomTypeCount === 0) gaps.push("已选标杆未取得可追溯房型名称");
 if (request.required_evidence.images && media.length < selected.length) gaps.push(`标杆图片未完整采集：${media.length}/${selected.length} 家`);
-if (request.required_evidence.pricing && pricedCandidateCount < selected.length) gaps.push(`同条件可订报价未完整采集：${pricedCandidateCount}/${selected.length} 家`);
+if (request.required_evidence.pricing && observedPriceCandidateCount < selected.length) {
+  gaps.push(`同条件页面价格观察未完整采集：${observedPriceCandidateCount}/${selected.length} 家`);
+}
+if (observedPriceCandidateCount > 0 && pricedCandidateCount < observedPriceCandidateCount) {
+  gaps.push("已保存携程 P1 页面价格观察；缺少 Network 双证据、税费口径或机位数，暂不得计入 ADR。");
+}
 
 const complete = gaps.length === 0;
 result.status = complete ? "complete" : "partial";
@@ -278,7 +343,11 @@ result.coverage = {
   benchmark_set: coverage(selected.length ? "complete" : "failed", selected.length),
   room_types: coverage(roomTypeCount ? "complete" : "failed", roomTypeCount),
   images: coverage(media.length === selected.length && selected.length ? "complete" : "partial", imageCount),
-  pricing: coverage(pricedCandidateCount === selected.length && selected.length ? "complete" : "partial", pricedCandidateCount),
+  pricing: coverage(
+    pricedCandidateCount === selected.length && selected.length ? "complete" : "partial",
+    observedPriceCandidateCount,
+    observedPriceCandidateCount > pricedCandidateCount ? "包含仅展示、未进入 ADR 的 P1 页面价格观察" : undefined,
+  ),
 };
 result.collection_gaps = gaps;
 result.competitor_analysis = {

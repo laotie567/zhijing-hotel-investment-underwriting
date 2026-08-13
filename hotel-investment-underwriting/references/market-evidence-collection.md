@@ -88,6 +88,12 @@ Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl、OpenCLI 是�
 返回 `partial`，请先在 Ego Lite 登录批准的 OTA 后重跑。完整 Mac Mini/Hermes
 预检、安装提示和两阶段请求见 `market-evidence-runtime.md`。
 
+在已登录且页面回显统一 `pricing_context` 后，Ego Profile 会将详情页可见的房型、可订状态、
+最终展示价、取消文案记录为 **P1 `pricing_observations`**，并仅选择酒店/房型图库图片（不会把
+账户头像、Logo 或二维码写入竞品视觉证据）。P1 会出现在 HTML 与飞书多维表格，便于人工比价和
+装修对标；但 Ego Profile 不读取 Network 载荷，也不猜测税费口径或机位数，故 P1 始终
+`adr_eligible: false`，不得进入财务 ADR。
+
 实时报价 Profile 必须为每条 `room_offers` 同时记录：正式竞品的 provider ID、OTA
 房源/房型 ID、房型、机位数、可订状态、每晚含税/取消口径价格、完全相同的
 `pricing_context`、来源 URL 和带时区采集时间。缺任一项的页面价格只能作为原始

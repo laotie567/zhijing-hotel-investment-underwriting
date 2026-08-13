@@ -209,6 +209,40 @@ class CompetitorAnalysisTests(unittest.TestCase):
         self.assertEqual(1, pricing["sample_count"])
         self.assertIsNone(pricing["recommended_adr"])
 
+    def test_ego_dom_only_p1_price_is_visible_but_cannot_change_adr(self) -> None:
+        request = complete_input(
+            [
+                candidate("P-1", 104.001, prices=[240]),
+                candidate("P-2", 104.002, prices=[260]),
+                candidate("P-3", 104.003, prices=[280]),
+            ]
+        )
+        request["candidates"][0]["pricing_observations"] = [
+            {
+                "room_type": "顶配电竞双人房",
+                "room_type_provider_id": "P-1:ego-dom:1",
+                "price_type": "P1",
+                "display_price": 999,
+                "currency": "CNY",
+                "availability": "available",
+                "pricing_context": request["pricing_context"],
+                "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                "observed_at": "2026-08-13T14:44:37+08:00",
+                "network_verified": False,
+                "dom_verified": True,
+                "price_match": False,
+                "adr_eligible": False,
+                "qualification_gaps": ["network_evidence_missing", "tax_scope_unknown"],
+            }
+        ]
+
+        result = competitor_analysis.analyze_competitors(request)
+
+        self.assertEqual(999, result["competitors"][0]["pricing_observations"][0]["display_price"])
+        pricing = result["pricing_by_workstations"][0]
+        self.assertEqual(260.0, pricing["recommended_adr"])
+        self.assertEqual(3, pricing["sample_count"])
+
     def test_low_confidence_sources_remain_visible_but_do_not_count_toward_adr(self) -> None:
         result = competitor_analysis.analyze_competitors(
             complete_input(

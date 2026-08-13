@@ -17,6 +17,7 @@ One stateless Skill per opportunity. Code decides 2km distance, classification, 
 
 - Formal competitors: same-provider, GCJ-02, operating primary-esports lodging within 2km with source. Never infer facts or widen range; incomplete evidence is `pre_evaluation_only`.
 - ADR requires complete collection, one `pricing_context`, three independent same-workstation `medium`/`high` properties; use median rounded to CNY 10. Never auto-write it into finance.
+- `ctrip-hotel-v1` runs through the authenticated Ego Lite task space. It records P1 (DOM) room type, availability, final displayed price, cancellation text and hotel/room-gallery images. P1 is a report/Base evidence record only: it never enters ADR because the Profile does not inspect Network payloads or infer tax scope/machine count.
 - `ctrip-live-rates-v1` uses Ui.Vision as the sole Ctrip page-action owner and OpenCLI only for Network/DOM observation. A P1/P2/P3 page price may be delivered as a `pricing_observation`; it enters `room_offers` and ADR only after exact context, Network/DOM agreement, availability, tax, cancellation and machine-count checks all pass.
 - Finance is code-only. Visual evidence binds to a formal `provider_place_id` and is bounded JPEG/PNG/WebP `data_uri` plus source URL; it never changes finance.
 - Credentials, sessions, storage, approval, dispatch and Base writeback stay in the host. On a new Mac Mini run `collect_market_evidence.py --preflight --all-engines`; obey its install hints. The collector has no UI, database or workflow state and never silently swaps engine/Profile.
