@@ -1,0 +1,13 @@
+{
+  "input": "references/sample-predeal-hotel.json",
+  "expected": {
+    "base_case.annual.0.gross_revenue": {"value": 1167414.3599999999, "tolerance": 0.01},
+    "base_case.annual.0.occ": {"value": 0.595945205479452, "tolerance": 1e-12},
+    "base_case.jwl.npv": {"value": 405518.4207754127, "tolerance": 0.01},
+    "base_case.jwl.discounted_payback_years": {"value": 1.416901330017239, "tolerance": 1e-12},
+    "base_case.annual.0.owner_economic_incremental_net_cashflow": {"value": -67662.74845199997, "tolerance": 0.01},
+    "base_case.owner_economic_incremental.npv": {"value": -234787.3851709463, "tolerance": 0.01},
+    "negotiation.minimum_jwl_share_for_hurdle": {"value": 0.22129178963231028, "tolerance": 1e-12},
+    "negotiation.maximum_jwl_initial_capex_at_hurdle": {"value": 407366.84498649, "tolerance": 0.01}
+  }
+}

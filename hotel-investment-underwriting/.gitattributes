@@ -1,0 +1,20 @@
+# Publish only the single-Skill runtime files when this directory is archived.
+scripts/* export-ignore
+scripts/calculate.py -export-ignore
+scripts/competitor_analysis.py -export-ignore
+scripts/competitor_report.py -export-ignore
+scripts/input_contract.py -export-ignore
+scripts/run.py -export-ignore
+
+schemas/* export-ignore
+schemas/project-input.schema.json -export-ignore
+schemas/skill-request.schema.json -export-ignore
+
+references/* export-ignore
+references/benchmark-defaults.json -export-ignore
+references/decision-policy.md -export-ignore
+references/input-schema.md -export-ignore
+references/methodology.md -export-ignore
+
+tests export-ignore
+tests/** export-ignore

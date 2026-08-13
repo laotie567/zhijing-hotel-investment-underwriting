@@ -1,0 +1,16 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Repository-only documentation never belongs in a release archive, even if a
+# packager archives the repository root by mistake. The production Skill has
+# no Git LFS, binary, or third-party runtime dependency.
+docs export-ignore
+docs/** export-ignore
+.env.example export-ignore
+.gitignore export-ignore
+CHANGELOG.md export-ignore
+README.md export-ignore

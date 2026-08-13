@@ -1,0 +1,158 @@
+{
+  "project": {
+    "name": "陌生酒店联营签约前测算示例",
+    "rooms": 20,
+    "workstations": 31,
+    "term_years": 6,
+    "operating_days": 365,
+    "opening_date": "2027-01-01"
+  },
+  "admission": {
+    "scores": {
+      "location_customer": 72,
+      "property_hardware": 70,
+      "room_scale": 68,
+      "operating_basics": 65,
+      "commercial_terms": 70
+    },
+    "minimum_score": 60,
+    "priority_score": 75
+  },
+  "contract": {
+    "jwl_share": 0.3,
+    "owner_share": 0.7,
+    "exit_occ_threshold": 0.5,
+    "equipment_depreciation_years": 3,
+    "renovation_depreciation_years": 6,
+    "high_season_share": 0.4,
+    "high_season_premium": 0.3,
+    "low_season_premium": 0.1
+  },
+  "revenue": {
+    "mode": "adr_occ",
+    "base_occ": 0.66,
+    "egame_adr": 245,
+    "traditional_adr": 195,
+    "traditional_occ": 0.61,
+    "traditional_contribution_margin_rate": 0.65,
+    "room_types": [
+      {
+        "name": "单机大床房",
+        "rooms": 9,
+        "workstations_per_room": 1,
+        "egame_adr": 218,
+        "base_occ": 0.68,
+        "traditional_adr": 180,
+        "traditional_occ": 0.62
+      },
+      {
+        "name": "双机双床房",
+        "rooms": 11,
+        "workstations_per_room": 2,
+        "egame_adr": 268,
+        "base_occ": 0.65,
+        "traditional_adr": 210,
+        "traditional_occ": 0.6
+      }
+    ],
+    "first_year_monthly_occ_schedule": [
+      0.35,
+      0.42,
+      0.5,
+      0.55,
+      0.6,
+      0.63,
+      0.65,
+      0.67,
+      0.68,
+      0.69,
+      0.7,
+      0.7
+    ],
+    "hourly_eligible_room_share": 0.5,
+    "hourly_turnovers_per_room_day": 0.15,
+    "hourly_rate": 80,
+    "ancillary_rate": 0.05,
+    "online_share": 0.75,
+    "other_annual": 0
+  },
+  "public_costs": {
+    "ota_commission_rate": 0.12,
+    "traffic_rate": 0.04,
+    "mystery_shopper_kol_rate": 0.01,
+    "offline_promotion_rate": 0.01,
+    "ota_performance_monthly": 1200,
+    "turnover_tax_rate": 0.06,
+    "shared_manager_room_threshold": 25,
+    "shared_manager_monthly": 0
+  },
+  "jwl": {
+    "capex": {
+      "cloud_box_per_seat": 1480,
+      "monitor_per_seat": 860,
+      "peripherals_per_seat": 400,
+      "peripherals_per_room": 0,
+      "furniture_per_seat": 1082,
+      "furniture_per_room": 0,
+      "install_per_room": 300,
+      "platform_fixed": 12000,
+      "other_fixed": 0
+    },
+    "opex_monthly": {
+      "cloud_fee_per_seat": 350,
+      "accelerator_fixed": 1000,
+      "system_fixed": 300,
+      "ota_team_fixed": 2000,
+      "maintenance_fixed": 500,
+      "other_fixed": 0,
+      "other_per_room": 0
+    },
+    "replacement": {
+      "year": 3,
+      "rate": 0.4,
+      "basis_components": [
+        "monitor_per_seat",
+        "peripherals_per_seat",
+        "furniture_per_seat"
+      ]
+    }
+  },
+  "owner": {
+    "capex": {
+      "renovation_per_room": 8000,
+      "weak_current_per_room": 1000,
+      "other_fixed": 0
+    },
+    "incremental_opex_monthly": {
+      "electricity_per_room": 400,
+      "linen_consumables_per_room": 200,
+      "labor_fixed": 0,
+      "other_fixed": 0
+    },
+    "allocated_opex_monthly": {
+      "rent_property_per_room": 600,
+      "base_staffing_fixed": 0,
+      "other_fixed": 0
+    }
+  },
+  "finance": {
+    "discount_rate": 0.1,
+    "hurdle_irr": 0.2,
+    "maximum_discounted_payback_years": 3,
+    "exit_occ_safety_buffer": 0.1,
+    "revenue_growth": 0.02,
+    "cost_inflation": 0.02,
+    "jwl_salvage_value": 0,
+    "owner_terminal_value": 0
+  },
+  "metadata": {
+    "data_confidence": "low",
+    "as_of": "2026-08-02",
+    "notes": "签约前示例；房型、市场收入、成本和谈判比例均需由潜在酒店实际资料替换"
+  },
+  "scenarios": [
+    {"name": "保守", "occ": 0.5},
+    {"name": "基准稳定期", "occ": 0.66},
+    {"name": "乐观", "occ": 0.75}
+  ]
+}

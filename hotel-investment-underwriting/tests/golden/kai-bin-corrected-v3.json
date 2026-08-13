@@ -1,0 +1,22 @@
+{
+  "case_id": "kai-bin-corrected-v3-2026-08-02",
+  "status": "provisional",
+  "source": "凯宾合同参数与V3错位公式修正后的已复核中间值",
+  "input": "references/sample-kai-bin.json",
+  "defaults": "references/benchmark-defaults.json",
+  "expected": {
+    "base_case.annual.0.gross_revenue": {"value": 1715400.72, "tolerance": 0.01},
+    "base_case.annual.0.public_cost_total": {"value": 410089.845024, "tolerance": 0.01},
+    "base_case.annual.0.distributable_net_revenue": {"value": 1305310.874976, "tolerance": 0.01},
+    "base_case.annual.0.jwl_net_cashflow": {"value": 380735.437488, "tolerance": 0.01},
+    "base_case.annual.0.owner_fully_loaded_net_cashflow": {"value": 321455.437488, "tolerance": 0.01},
+    "base_case.jwl.initial_capex": {"value": 181280.0, "tolerance": 0.01},
+    "base_case.jwl.replacement_capex": {"value": 15640.0, "tolerance": 0.01},
+    "base_case.jwl.npv": {"value": 1465171.5242979424, "tolerance": 0.01},
+    "base_case.jwl.irr": {"value": 2.091750686181645, "tolerance": 0.000000001},
+    "base_case.jwl.discounted_payback_years": {"value": 0.5237442600973673, "tolerance": 0.000000001},
+    "base_case.jwl.break_even_occ": {"value": 0.2383050417774939, "tolerance": 0.000000001},
+    "base_case.owner_fully_loaded.npv": {"value": 1216022.2335199225, "tolerance": 0.01},
+    "base_case.owner_fully_loaded.irr": {"value": 1.7429383167639507, "tolerance": 0.000000001}
+  }
+}

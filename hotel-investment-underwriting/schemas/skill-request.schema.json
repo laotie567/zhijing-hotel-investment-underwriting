@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Competitor-aware hotel investment Skill request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project_input"],
+  "properties": {
+    "project_input": {
+      "$ref": "project-input.schema.json"
+    },
+    "competitor_analysis": {
+      "type": "object",
+      "properties": {
+        "confirmed_location": {
+          "type": "object",
+          "properties": {
+            "provider": {"type": "string"},
+            "provider_place_id": {"type": "string"},
+            "coordinate_system": {"const": "GCJ-02"},
+            "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+            "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+            "status": {"enum": ["confirmed", "auto_confirmed_exact"]}
+          }
+        },
+        "collection_status": {"enum": ["complete", "partial"]},
+        "pricing_context": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["check_in_date", "nights", "guests", "currency"],
+          "properties": {
+            "check_in_date": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "nights": {"type": "integer", "minimum": 1},
+            "guests": {"type": "integer", "minimum": 1},
+            "currency": {"const": "CNY"}
+          }
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "provider": {"type": "string"},
+              "provider_place_id": {"type": "string"},
+              "name": {"type": "string"},
+              "coordinate_system": {"const": "GCJ-02"},
+              "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+              "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+              "property_kind": {"enum": ["lodging", "non_lodging"]},
+              "esports_positioning": {"enum": ["primary", "incidental"]},
+              "operating_status": {"enum": ["operating", "closed"]},
+              "source": {
+                "type": "object",
+                "properties": {
+                  "source_platform": {"type": "string"},
+                  "source_url": {"type": "string", "format": "uri"},
+                  "observed_at": {"type": "string", "format": "date-time"},
+                  "confidence": {"enum": ["low", "medium", "high"]}
+                }
+              },
+              "room_offers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "room_type": {"type": "string"},
+                    "workstations": {"type": "integer", "minimum": 1},
+                    "nightly_price": {"type": "number", "exclusiveMinimum": 0}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "competitor_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 160},
+        "candidate_media": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["provider_place_id"],
+            "properties": {
+              "provider_place_id": {"type": "string", "minLength": 1, "maxLength": 200},
+              "renovation_observation": {"type": "string", "minLength": 1, "maxLength": 2000},
+              "observation_source_url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+              "images": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["data_uri", "source_url"],
+                  "properties": {
+                    "caption": {"type": "string", "minLength": 1, "maxLength": 240},
+                    "data_uri": {
+                      "type": "string",
+                      "maxLength": 2800000,
+                      "pattern": "^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$"
+                    },
+                    "source_url": {"type": "string", "format": "uri", "pattern": "^https?://"}
+                  }
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {"required": ["renovation_observation"]},
+                "then": {"required": ["observation_source_url"]}
+              },
+              {
+                "if": {"required": ["observation_source_url"]},
+                "then": {"required": ["renovation_observation"]}
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

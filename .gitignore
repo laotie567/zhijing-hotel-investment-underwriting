@@ -1,0 +1,52 @@
+# macOS and editors
+.DS_Store
+._*
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python caches and tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local runtime configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets/
+
+# Generated test artifacts and logs
+hotel-investment-underwriting-test-results/
+logs/
+*.log
+*.tmp
+
+# Historical customer-source drop. It is intentionally outside the minimal
+# production Skill; recover a legacy source through Git history when needed.
+竞未来电竞酒店原始资料/
+
+# The published Skill is source-only. Keep customer office files outside this
+# repository; the archive test also enforces the exact release allowlist.
+*.xlsx
+*.xls
+*.docx
+*.doc
+
+# Reproducible release artifacts
+*.zip
+dist/
+
+# Office temporary files
+~$*.xlsx
+~$*.docx

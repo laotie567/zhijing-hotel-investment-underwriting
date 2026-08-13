@@ -1,0 +1,56 @@
+{
+  "project": {
+    "name": "青白江凯宾酒店联营电竞房",
+    "rooms": 23,
+    "workstations": 46,
+    "term_years": 6,
+    "operating_days": 365
+  },
+  "contract": {
+    "jwl_share": 0.5,
+    "owner_share": 0.5,
+    "equipment_depreciation_years": 3,
+    "renovation_depreciation_years": 6,
+    "exit_occ_threshold": 0.6,
+    "high_season_share": 0.4,
+    "high_season_premium": 0.3,
+    "low_season_premium": 0.1
+  },
+  "metadata": {
+    "data_confidence": "low",
+    "as_of": "2026-04-15",
+    "notes": "合同结构已核对；46个机位和收入、成本参数仍含项目基准假设",
+    "evidence": {
+      "project.rooms": {
+        "source_class": "contract",
+        "source": "《竞未来电竞酒店品牌合作协议-凯宾酒店（青白江万达店）》第2.1条",
+        "status": "confirmed"
+      },
+      "project.workstations": {
+        "source_class": "project_benchmark",
+        "source": "V3模型按23间×2机位试算，待房型清单确认",
+        "status": "candidate"
+      },
+      "project.term_years": {
+        "source_class": "contract",
+        "source": "合同第10.1条",
+        "status": "confirmed"
+      },
+      "contract.shares": {
+        "source_class": "contract",
+        "source": "合同第3.3条",
+        "status": "confirmed"
+      },
+      "contract.exit_occ_threshold": {
+        "source_class": "contract",
+        "source": "合同第10.3(4)条",
+        "status": "confirmed"
+      },
+      "contract.price_premium": {
+        "source_class": "contract",
+        "source": "合同第3.5条；旺季占比40%为试算假设",
+        "status": "confirmed"
+      }
+    }
+  }
+}

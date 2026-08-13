@@ -1,0 +1,338 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jwl.example/schemas/hotel-investment-project-input-v3.json",
+  "title": "Hotel investment underwriting input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project", "contract", "revenue", "public_costs", "jwl", "owner", "finance"],
+  "properties": {
+    "project": {"$ref": "#/$defs/project"},
+    "admission": {"$ref": "#/$defs/admission"},
+    "contract": {"$ref": "#/$defs/contract"},
+    "revenue": {"$ref": "#/$defs/revenue"},
+    "public_costs": {"$ref": "#/$defs/public_costs"},
+    "jwl": {"$ref": "#/$defs/jwl"},
+    "owner": {"$ref": "#/$defs/owner"},
+    "finance": {"$ref": "#/$defs/finance"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "scenarios": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/scenario"}
+    }
+  },
+  "$defs": {
+    "rate": {"type": "number", "minimum": 0, "maximum": 1},
+    "nonnegative": {"type": "number", "minimum": 0},
+    "positive": {"type": "number", "exclusiveMinimum": 0},
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "rooms", "term_years", "operating_days"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "rooms": {"$ref": "#/$defs/positive"},
+        "workstations": {"$ref": "#/$defs/positive"},
+        "term_years": {"type": "integer", "minimum": 1},
+        "operating_days": {"type": "integer", "minimum": 1, "maximum": 366},
+        "seats_per_room": {"$ref": "#/$defs/positive"},
+        "opening_date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+      }
+    },
+    "admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hard_gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "legal_operation": {"type": "boolean"},
+            "ownership_or_lease_clear": {"type": "boolean"},
+            "fire_and_electrical_feasible": {"type": "boolean"},
+            "network_feasible": {"type": "boolean"},
+            "owner_funding_confirmed": {"type": "boolean"}
+          }
+        },
+        "scores": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "location_customer": {"type": "number", "minimum": 0, "maximum": 100},
+            "property_hardware": {"type": "number", "minimum": 0, "maximum": 100},
+            "room_scale": {"type": "number", "minimum": 0, "maximum": 100},
+            "operating_basics": {"type": "number", "minimum": 0, "maximum": 100},
+            "commercial_terms": {"type": "number", "minimum": 0, "maximum": 100}
+          }
+        },
+        "weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "location_customer": {"$ref": "#/$defs/rate"},
+            "property_hardware": {"$ref": "#/$defs/rate"},
+            "room_scale": {"$ref": "#/$defs/rate"},
+            "operating_basics": {"$ref": "#/$defs/rate"},
+            "commercial_terms": {"$ref": "#/$defs/rate"}
+          }
+        },
+        "minimum_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "priority_score": {"type": "number", "minimum": 0, "maximum": 100}
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jwl_share", "owner_share", "exit_occ_threshold", "equipment_depreciation_years", "renovation_depreciation_years", "high_season_share", "high_season_premium", "low_season_premium"],
+      "properties": {
+        "jwl_share": {"$ref": "#/$defs/rate"},
+        "owner_share": {"$ref": "#/$defs/rate"},
+        "exit_occ_threshold": {"$ref": "#/$defs/rate"},
+        "equipment_depreciation_years": {"type": "integer", "minimum": 1},
+        "renovation_depreciation_years": {"type": "integer", "minimum": 1},
+        "high_season_share": {"$ref": "#/$defs/rate"},
+        "high_season_premium": {"$ref": "#/$defs/rate"},
+        "low_season_premium": {"$ref": "#/$defs/rate"}
+      }
+    },
+    "revenue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "base_occ", "hourly_eligible_room_share", "hourly_turnovers_per_room_day", "hourly_rate", "ancillary_rate", "online_share"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["adr_occ", "revpar"]},
+        "base_occ": {"$ref": "#/$defs/rate"},
+        "egame_adr": {"$ref": "#/$defs/nonnegative"},
+        "egame_revpar": {"$ref": "#/$defs/nonnegative"},
+        "traditional_revpar": {"$ref": "#/$defs/nonnegative"},
+        "traditional_adr": {"$ref": "#/$defs/nonnegative"},
+        "traditional_occ": {"$ref": "#/$defs/rate"},
+        "traditional_contribution_margin_rate": {"$ref": "#/$defs/rate"},
+        "hourly_eligible_room_share": {"$ref": "#/$defs/rate"},
+        "hourly_turnovers_per_room_day": {"$ref": "#/$defs/nonnegative"},
+        "hourly_rate": {"$ref": "#/$defs/nonnegative"},
+        "ancillary_rate": {"$ref": "#/$defs/rate"},
+        "online_share": {"$ref": "#/$defs/rate"},
+        "other_annual": {"$ref": "#/$defs/nonnegative"},
+        "room_types": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/room_type"}
+        },
+        "first_year_monthly_occ_schedule": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": {"$ref": "#/$defs/rate"}
+        },
+        "annual_occ_schedule": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/rate"}
+        }
+      }
+    },
+    "room_type": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "rooms", "workstations_per_room"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "rooms": {"type": "integer", "minimum": 1},
+        "workstations_per_room": {"$ref": "#/$defs/positive"},
+        "egame_adr": {"$ref": "#/$defs/nonnegative"},
+        "egame_revpar": {"$ref": "#/$defs/nonnegative"},
+        "base_occ": {"$ref": "#/$defs/rate"},
+        "traditional_adr": {"$ref": "#/$defs/nonnegative"},
+        "traditional_revpar": {"$ref": "#/$defs/nonnegative"},
+        "traditional_occ": {"$ref": "#/$defs/rate"},
+        "traditional_contribution_margin_rate": {"$ref": "#/$defs/rate"}
+      }
+    },
+    "public_costs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ota_commission_rate", "traffic_rate", "mystery_shopper_kol_rate", "offline_promotion_rate", "ota_performance_monthly", "turnover_tax_rate"],
+      "properties": {
+        "ota_commission_rate": {"$ref": "#/$defs/rate"},
+        "traffic_rate": {"$ref": "#/$defs/rate"},
+        "mystery_shopper_kol_rate": {"$ref": "#/$defs/rate"},
+        "offline_promotion_rate": {"$ref": "#/$defs/rate"},
+        "ota_performance_monthly": {"$ref": "#/$defs/nonnegative"},
+        "turnover_tax_rate": {"$ref": "#/$defs/rate"},
+        "shared_manager_room_threshold": {"$ref": "#/$defs/nonnegative"},
+        "shared_manager_monthly": {"$ref": "#/$defs/nonnegative"}
+      }
+    },
+    "jwl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capex", "opex_monthly", "replacement"],
+      "properties": {
+        "capex": {"$ref": "#/$defs/jwl_capex"},
+        "opex_monthly": {"$ref": "#/$defs/jwl_opex"},
+        "replacement": {"$ref": "#/$defs/replacement"}
+      }
+    },
+    "jwl_capex": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cloud_box_per_seat": {"$ref": "#/$defs/nonnegative"},
+        "monitor_per_seat": {"$ref": "#/$defs/nonnegative"},
+        "peripherals_per_seat": {"$ref": "#/$defs/nonnegative"},
+        "peripherals_per_room": {"$ref": "#/$defs/nonnegative"},
+        "furniture_per_seat": {"$ref": "#/$defs/nonnegative"},
+        "furniture_per_room": {"$ref": "#/$defs/nonnegative"},
+        "install_per_room": {"$ref": "#/$defs/nonnegative"},
+        "platform_fixed": {"$ref": "#/$defs/nonnegative"},
+        "other_fixed": {"$ref": "#/$defs/nonnegative"}
+      }
+    },
+    "jwl_opex": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cloud_fee_per_seat": {"$ref": "#/$defs/nonnegative"},
+        "accelerator_fixed": {"$ref": "#/$defs/nonnegative"},
+        "system_fixed": {"$ref": "#/$defs/nonnegative"},
+        "ota_team_fixed": {"$ref": "#/$defs/nonnegative"},
+        "maintenance_fixed": {"$ref": "#/$defs/nonnegative"},
+        "other_fixed": {"$ref": "#/$defs/nonnegative"},
+        "other_per_room": {"$ref": "#/$defs/nonnegative"}
+      }
+    },
+    "replacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["year"],
+      "properties": {
+        "year": {"type": "integer", "minimum": 1},
+        "rate": {"$ref": "#/$defs/rate"},
+        "basis_components": {"type": "array", "items": {"type": "string"}},
+        "amount": {"$ref": "#/$defs/nonnegative"}
+      }
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capex", "incremental_opex_monthly", "allocated_opex_monthly"],
+      "properties": {
+        "capex": {"$ref": "#/$defs/owner_capex"},
+        "incremental_opex_monthly": {"$ref": "#/$defs/owner_incremental"},
+        "allocated_opex_monthly": {"$ref": "#/$defs/owner_allocated"}
+      }
+    },
+    "owner_capex": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "renovation_per_room": {"$ref": "#/$defs/nonnegative"},
+        "weak_current_per_room": {"$ref": "#/$defs/nonnegative"},
+        "other_fixed": {"$ref": "#/$defs/nonnegative"}
+      }
+    },
+    "owner_incremental": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "electricity_per_room": {"$ref": "#/$defs/nonnegative"},
+        "linen_consumables_per_room": {"$ref": "#/$defs/nonnegative"},
+        "labor_fixed": {"$ref": "#/$defs/nonnegative"},
+        "other_fixed": {"$ref": "#/$defs/nonnegative"}
+      }
+    },
+    "owner_allocated": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rent_property_per_room": {"$ref": "#/$defs/nonnegative"},
+        "base_staffing_fixed": {"$ref": "#/$defs/nonnegative"},
+        "other_fixed": {"$ref": "#/$defs/nonnegative"}
+      }
+    },
+    "finance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discount_rate", "hurdle_irr", "maximum_discounted_payback_years", "exit_occ_safety_buffer"],
+      "properties": {
+        "discount_rate": {"type": "number", "exclusiveMinimum": -1},
+        "hurdle_irr": {"type": "number", "minimum": 0},
+        "maximum_discounted_payback_years": {"$ref": "#/$defs/positive"},
+        "exit_occ_safety_buffer": {"$ref": "#/$defs/rate"},
+        "revenue_growth": {"type": "number", "exclusiveMinimum": -1},
+        "cost_inflation": {"type": "number", "exclusiveMinimum": -1},
+        "jwl_salvage_value": {"$ref": "#/$defs/nonnegative"},
+        "owner_terminal_value": {"$ref": "#/$defs/nonnegative"}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "data_confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "forecast_confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "forecast_validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": {"type": "string", "enum": ["unvalidated", "backtested", "approved"]},
+            "sample_size": {"type": "integer", "minimum": 0},
+            "method": {"type": "string", "minLength": 1},
+            "as_of": {"type": "string", "minLength": 1},
+            "approved_by": {"type": "string", "minLength": 1},
+            "approved_at": {"type": "string", "minLength": 1}
+          }
+        },
+        "as_of": {"type": "string", "minLength": 1},
+        "notes": {"type": "string"},
+        "evidence": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/evidence_record"}
+        }
+      }
+    },
+    "evidence_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_class", "source", "status"],
+      "properties": {
+        "source_class": {
+          "type": "string",
+          "enum": ["contract", "hotel_actual", "vendor_quote", "verified_comparable", "market_research", "project_benchmark", "assumption"]
+        },
+        "source": {"type": "string", "minLength": 1},
+        "as_of": {"type": "string", "minLength": 1},
+        "status": {"type": "string", "enum": ["candidate", "confirmed", "approved", "rejected"]},
+        "approved_by": {"type": "string", "minLength": 1},
+        "approved_at": {"type": "string", "minLength": 1},
+        "unit": {"type": "string"},
+        "value": {}
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "occ": {"$ref": "#/$defs/rate"},
+        "overrides": {"$ref": "#/$defs/overrides"}
+      }
+    },
+    "overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {"$ref": "#/$defs/project"},
+        "admission": {"$ref": "#/$defs/admission"},
+        "contract": {"$ref": "#/$defs/contract"},
+        "revenue": {"$ref": "#/$defs/revenue"},
+        "public_costs": {"$ref": "#/$defs/public_costs"},
+        "jwl": {"$ref": "#/$defs/jwl"},
+        "owner": {"$ref": "#/$defs/owner"},
+        "finance": {"$ref": "#/$defs/finance"}
+      }
+    }
+  }
+}

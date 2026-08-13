@@ -1,0 +1,108 @@
+{
+  "project": {
+    "operating_days": 365,
+    "seats_per_room": 2
+  },
+  "revenue": {
+    "mode": "adr_occ",
+    "base_occ": 0.7,
+    "egame_adr": 236,
+    "traditional_adr": 200,
+    "traditional_occ": 0.7,
+    "hourly_eligible_room_share": 1.0,
+    "hourly_turnovers_per_room_day": 0.3,
+    "hourly_rate": 80,
+    "ancillary_rate": 0.08,
+    "online_share": 0.75,
+    "other_annual": 0
+  },
+  "public_costs": {
+    "ota_commission_rate": 0.12,
+    "traffic_rate": 0.06,
+    "mystery_shopper_kol_rate": 0.02,
+    "offline_promotion_rate": 0.01,
+    "ota_performance_monthly": 1500,
+    "turnover_tax_rate": 0.06,
+    "shared_manager_room_threshold": 25,
+    "shared_manager_monthly": 0
+  },
+  "jwl": {
+    "capex": {
+      "cloud_box_per_seat": 1480,
+      "monitor_per_seat": 1200,
+      "peripherals_per_seat": 0,
+      "peripherals_per_room": 500,
+      "furniture_per_seat": 0,
+      "furniture_per_room": 1200,
+      "install_per_room": 300,
+      "platform_fixed": 12000,
+      "other_fixed": 0
+    },
+    "opex_monthly": {
+      "cloud_fee_per_seat": 410,
+      "accelerator_fixed": 1000,
+      "system_fixed": 300,
+      "ota_team_fixed": 2000,
+      "maintenance_fixed": 500,
+      "other_fixed": 0,
+      "other_per_room": 0
+    },
+    "replacement": {
+      "year": 3,
+      "rate": 0.4,
+      "basis_components": [
+        "peripherals_per_room",
+        "furniture_per_room"
+      ]
+    }
+  },
+  "owner": {
+    "capex": {
+      "renovation_per_room": 8000,
+      "weak_current_per_room": 0,
+      "other_fixed": 0
+    },
+    "incremental_opex_monthly": {
+      "electricity_per_room": 400,
+      "linen_consumables_per_room": 200,
+      "labor_fixed": 0,
+      "other_fixed": 0
+    },
+    "allocated_opex_monthly": {
+      "rent_property_per_room": 600,
+      "base_staffing_fixed": 0,
+      "other_fixed": 0
+    }
+  },
+  "finance": {
+    "discount_rate": 0.1,
+    "hurdle_irr": 0.2,
+    "maximum_discounted_payback_years": 3,
+    "exit_occ_safety_buffer": 0.1,
+    "revenue_growth": 0,
+    "cost_inflation": 0,
+    "jwl_salvage_value": 0,
+    "owner_terminal_value": 0
+  },
+  "metadata": {
+    "data_confidence": "low"
+  },
+  "scenarios": [
+    {
+      "name": "保守",
+      "occ": 0.55
+    },
+    {
+      "name": "中性",
+      "occ": 0.7
+    },
+    {
+      "name": "乐观",
+      "occ": 0.8
+    },
+    {
+      "name": "理想",
+      "occ": 0.9
+    }
+  ]
+}

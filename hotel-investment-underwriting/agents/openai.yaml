@@ -1,0 +1,4 @@
+interface:
+  display_name: "电竞酒店投测、2km竞品与视觉报告"
+  short_description: "2km竞品、收益测算与独立视觉HTML报告的生产Skill"
+  default_prompt: "Use $hotel-investment-underwriting to analyze 2km pure-esports competitors, underwrite a hotel, and generate a standalone visual competitor benchmark report."
