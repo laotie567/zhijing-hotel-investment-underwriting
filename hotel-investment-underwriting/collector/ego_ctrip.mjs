@@ -350,9 +350,14 @@ result.coverage = {
   ),
 };
 result.collection_gaps = gaps;
+// The incoming inventory is the already bounded 2km map pool.  A full pool
+// remains a completed spatial analysis even if live OTA rates are partial or
+// only P1; this preserves valid competitor and visual research while the ADR
+// gate continues to require P2 room offers.
+const spatialCollectionComplete = inventory.length > 0 && inventory.length < request.search.max_candidates;
 result.competitor_analysis = {
   confirmed_location: request.target.center || null,
-  collection_status: complete ? "complete" : "partial",
+  collection_status: spatialCollectionComplete ? "complete" : "partial",
   pricing_context: request.pricing_context,
   candidates,
 };

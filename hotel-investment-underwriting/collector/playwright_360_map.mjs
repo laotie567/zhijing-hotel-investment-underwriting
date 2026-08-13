@@ -9,11 +9,13 @@
  */
 
 import { chromium } from "playwright";
+import { pathToFileURL } from "node:url";
 
 const CONTRACT_VERSION = "market-evidence-collection/v1";
 const PROFILE = "360-map-v1";
 const PROVIDER = "360地图";
 const PAGE_SIZE = 30;
+const MAX_BENCHMARK_CANDIDATES = 8;
 const EARTH_RADIUS_METERS = 6_371_000;
 const MAX_EMBEDDED_BYTES = 7_500_000;
 const USER_AGENT = "Mozilla/5.0 (compatible; ZhijingMarketEvidence/1.0)";
@@ -198,6 +200,48 @@ function firstRoomPhoto(detail) {
   return null;
 }
 
+function reviewCount(item) {
+  const value = item?.detail?.review_count ?? item?.review_count ?? item?.comment_num;
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function benchmarkCandidates(candidates, requestedMaximum) {
+  // Choose a bounded, repeatable high-quality set within the intact 2km pool.
+  // This ranking only decides which at-most-eight candidates receive costly
+  // OTA room/photo research. It prefers a public room photo, room-type
+  // disclosure, rating/review signal and then shorter distance. Provider ID is
+  // the last tie-breaker, keeping a repeat run deterministic.
+  const requested = Number(requestedMaximum);
+  const maximum = Number.isInteger(requested)
+    ? Math.min(Math.max(requested, 0), MAX_BENCHMARK_CANDIDATES)
+    : MAX_BENCHMARK_CANDIDATES;
+  return [...candidates]
+    .sort((left, right) => {
+      const leftPhoto = firstRoomPhoto(left.item.detail) ? 1 : 0;
+      const rightPhoto = firstRoomPhoto(right.item.detail) ? 1 : 0;
+      if (rightPhoto !== leftPhoto) return rightPhoto - leftPhoto;
+      const leftRooms = roomTypeNames(left.item.detail).length;
+      const rightRooms = roomTypeNames(right.item.detail).length;
+      if (rightRooms !== leftRooms) return rightRooms - leftRooms;
+      const leftRating = Number.isFinite(left.item.avg_rating) ? Number(left.item.avg_rating) : 0;
+      const rightRating = Number.isFinite(right.item.avg_rating) ? Number(right.item.avg_rating) : 0;
+      if (rightRating !== leftRating) return rightRating - leftRating;
+      const leftReviews = reviewCount(left.item);
+      const rightReviews = reviewCount(right.item);
+      if (rightReviews !== leftReviews) return rightReviews - leftReviews;
+      if (left.distance !== right.distance) return left.distance - right.distance;
+      return String(left.item.pguid).localeCompare(String(right.item.pguid), "zh-CN");
+    })
+    .slice(0, maximum);
+}
+
+function candidateProvider(center) {
+  // Classification compares a candidate with the confirmed 2km centre by
+  // provider identity. `360地图` is only a display label, so reuse the actual
+  // centre identity and keep automatic/manual centre confirmation consistent.
+  return center.provider;
+}
+
 function profile(item, detail) {
   const roomTypes = roomTypeNames(detail);
   const features = [
@@ -320,11 +364,13 @@ async function main() {
       .sort((left, right) => left.distance - right.distance)
       .slice(0, input.search.max_candidates);
 
-    const benchmarkCandidateIds = new Set(
-      candidates.slice(0, input.search.max_benchmark_candidates).map(({ item }) => item.pguid)
+    const selectedBenchmarks = benchmarkCandidates(
+      candidates,
+      input.search.max_benchmark_candidates,
     );
+    const benchmarkCandidateIds = new Set(selectedBenchmarks.map(({ item }) => item.pguid));
     const formalCandidates = candidates.map(({ item }) => ({
-      provider: PROVIDER,
+      provider: candidateProvider(center),
       provider_place_id: item.pguid,
       name: compactText(item.name, 300),
       coordinate_system: "GCJ-02",
@@ -394,9 +440,12 @@ async function main() {
       gaps.push(`竞品图片未覆盖全部已选标杆：已取得 ${candidateMedia.length}/${benchmarkCandidateCount} 家`);
     }
     if (required.room_types && roomTypeCount === 0) gaps.push("页面未取得可追溯的竞品房型名称");
-    // This profile deliberately has no booking checkout flow.  A price profile
-    // must use the exact shared date/night/guest context before emitting offers.
-    if (required.pricing) gaps.push("当前页面来源未完成同条件房态与报价采集；不得生成竞品 ADR 建议");
+    // This profile deliberately has no booking checkout flow.  It may complete
+    // the 2km candidate pool, but can never complete the end-to-end evidence
+    // set by itself: an OTA profile must supply the shared-context room quotes.
+    // Keep this gap even when pricing is not requested in this invocation so
+    // `status=complete` never contradicts `coverage.pricing=not_collected`.
+    gaps.push("360 地图已完成 2km 候选池；同条件房态与报价须由 OTA Profile 补齐，当前不得生成竞品 ADR 建议");
     const complete = gaps.length === 0;
     result.status = complete ? "complete" : "partial";
     result.collector.finished_at = now();
@@ -414,9 +463,13 @@ async function main() {
       pricing: coverage("not_collected", 0, "360 Map broad listing data is not a same-context room quote"),
     };
     result.collection_gaps = gaps;
+    // Spatial classification is complete once the entire bounded 2km pool has
+    // been enumerated. Price collection is a separate downstream OTA concern;
+    // it must not erase valid location/competitor evidence.
+    const spatialCollectionComplete = !sourceSetTruncated;
     result.competitor_analysis = {
       confirmed_location: center,
-      collection_status: complete ? "complete" : "partial",
+      collection_status: spatialCollectionComplete ? "complete" : "partial",
       pricing_context: input.pricing_context,
       candidates: formalCandidates,
     };
@@ -430,7 +483,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error?.stack || error}\n`);
-  process.exitCode = 2;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    process.stderr.write(`${error?.stack || error}\n`);
+    process.exitCode = 2;
+  });
+}
+
+export { benchmarkCandidates, candidateProvider, firstRoomPhoto, roomTypeNames };

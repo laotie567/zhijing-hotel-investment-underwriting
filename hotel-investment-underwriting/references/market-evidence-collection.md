@@ -38,8 +38,9 @@ GCJ-02 中心点；采集器不能把同名物业猜成精确点位。
 ## 运行时与引擎
 
 默认 Profile 是 `360-map-v1`，以无头 Playwright 打开页面来源，保留每一次
-页面/图片请求的 URL、HTTP 状态和时间。它负责**全量 2km 空间候选**，再按距离
-生成有限的价格/视觉标杆集，不要求每家泛候选都有图片或实时价格。安装一次运行时
+页面/图片请求的 URL、HTTP 状态和时间。它负责**全量 2km 空间候选**，再从其中按
+公开房图、房型披露、评分/点评信号、距离的固定顺序生成有限的价格/视觉标杆集；标杆
+**最多 8 家**，不要求每家泛候选都有图片或实时价格。安装一次运行时
 后即可供 Hermes、OpenAI Agent 或任意本地进程调用：
 
 ```bash
@@ -71,16 +72,23 @@ Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl、OpenCLI 是�
 未配置时命令必须失败，绝不偷偷切换来源或伪造数据。每个生产 Profile 都要在其
 来源页面/网络响应变更后重新验收，并保留 `collector.page_sources` 回执。
 
+`max_benchmark_candidates` 的默认值与硬上限都是 `8`。它只限制进入 OTA 价格、房型和
+图片深度调研的标杆数，绝不截断 2km 候选池；若页面候选数超过 `max_candidates`，结果
+必须标记为 `partial`，而不是悄悄遗漏候选。
+
 ## 完成条件与价格纪律
 
 输出包含五个独立覆盖度：`candidates`、`benchmark_set`、`room_types`、`images`、`pricing`。
-只有所有用户要求的维度完成，结果才是 `status=complete`，并允许 Skill 把
-`competitor_analysis.collection_status` 标记为 `complete`。
+只有所有用户要求的维度完成，**采集回执**才是 `status=complete`。但
+`competitor_analysis.collection_status` 只表达全量 2km 空间候选是否完成：当候选池未被
+截断、坐标/来源完整时，它可以为 `complete`，即使后续 OTA 报价回执仍是 `partial`。
+这会保留已核验的竞品、房型和房图；`pricing=partial` 仍严格阻止任何 ADR 推导。
 
 当前 `360-map-v1` 能采集目标点、2km 候选、公开房型名称和标杆公开房图；它不会把
 地图列表价当成房价。因为缺少与 `pricing_context` 完全一致的入住日、晚数、人数、
 币种和可订状态，该 Profile 会返回 `pricing=not_collected` 与 `status=partial`。
-这会让测算 Skill 保持 `pre_evaluation_only`，而不是生成伪 ADR。
+它不会生成伪 ADR；若 2km 空间候选已完整，Skill 仍可输出待人工确认目标 ADR 的
+`ready_for_review`，但绝不会把地图列表价写入财务输入。
 
 `ctrip-hotel-v1` 是 macOS 上的 Ego Lite Profile。它以全量地图结果传入的
 `candidate_inventory` 为边界，只处理 `benchmark_selected: true` 且已有显式

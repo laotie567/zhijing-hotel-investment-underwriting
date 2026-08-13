@@ -139,6 +139,24 @@ class MarketEvidenceContractTests(unittest.TestCase):
         with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "ota_property"):
             market_evidence_contract.validate_collection_request(value)
 
+    def test_2km_benchmark_set_is_hard_capped_at_eight(self) -> None:
+        invalid = request()
+        invalid["search"]["max_benchmark_candidates"] = 9
+        with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "between 0 and 8"):
+            market_evidence_contract.validate_collection_request(invalid)
+
+        invalid = request()
+        invalid["search"]["provider_profile"] = "ctrip-hotel-v1"
+        inventory = []
+        for index in range(9):
+            entry = copy.deepcopy(selected_inventory()[0])
+            entry["candidate"]["provider_place_id"] = f"candidate-{index:03d}"
+            entry["ota_property"]["property_id"] = f"property-{index:03d}"
+            inventory.append(entry)
+        invalid["candidate_inventory"] = inventory
+        with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "at most 8"):
+            market_evidence_contract.validate_collection_request(invalid)
+
     def test_collection_patch_contains_only_public_skill_input_fields(self) -> None:
         patch = market_evidence_contract.skill_request_patch(result())
 
@@ -146,6 +164,15 @@ class MarketEvidenceContractTests(unittest.TestCase):
             {"market_evidence", "competitor_analysis", "competitor_report"}, set(patch)
         )
         self.assertEqual("partial", patch["competitor_analysis"]["collection_status"])
+
+    def test_partial_ota_receipt_may_preserve_completed_spatial_collection(self) -> None:
+        value = result()
+        value["competitor_analysis"]["collection_status"] = "complete"
+
+        normalized = market_evidence_contract.validate_collection_result(value)
+
+        self.assertEqual("partial", normalized["status"])
+        self.assertEqual("complete", normalized["competitor_analysis"]["collection_status"])
 
     def test_complete_result_rejects_uncollected_price_or_partial_images(self) -> None:
         invalid = result(status="complete")

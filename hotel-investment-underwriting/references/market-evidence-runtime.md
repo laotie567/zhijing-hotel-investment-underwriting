@@ -30,8 +30,8 @@ python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
 ## 受控的两阶段采集
 
 1. 用 `360-map-v1` 建立 **全量 2km 候选集**。它对每家候选保留同源地图实体、坐标
-   和来源，同时按距离选择有限数量的 `benchmark_selected` 标杆，不要求所有泛候选
-   都有图片或价格。
+   和来源，再按公开房图、房型披露、评分/点评信号和距离的固定顺序选出
+   `benchmark_selected` 标杆，**最多 8 家**；不要求所有泛候选都有图片或价格。
 2. 将全量候选放进 `candidate_inventory`。`ctrip-hotel-v1` 仍要求每个选中标杆先写入
    经页面确认的 `ota_property` 映射；`ctrip-live-rates-v1` 可以仅对唯一精确的
    `opencli ctrip search` 结果自动建立映射。随后用 `ego-browser` 或
@@ -97,6 +97,10 @@ Playwright 认证上下文或其他显式页面适配器，而不是模拟 Ego �
 - `candidates`：2km 全量空间候选；
 - `benchmark_set`：基于确定规则选出的价格/视觉标杆；
 - `room_types`、`images`、`pricing`：仅对标杆集核验。
+
+`collection_result.status` 是五类覆盖度的总状态；`competitor_analysis.collection_status`
+只判断 2km 空间候选池。故 OTA 的 P1/售罄/登录门槛可令回执保持 `partial`，但不能抹掉
+已完整的 2km 竞品集合或其已经取得的视觉证据；它只会令 ADR 保持不可用。
 
 图片交付为内嵌 JPEG/PNG/WebP，附来源 URL、采集时间、MIME 与 SHA-256；报价附
 OTA 房源/房型 ID、可订状态、税费、取消政策、来源 URL 和时间。只有这些字段与

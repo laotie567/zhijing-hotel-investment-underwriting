@@ -541,6 +541,11 @@ def render_competitor_report(
         else [["报价口径", "未形成统一报价口径；不生成建议 ADR。"]]
     )
     media_by_place_id = _candidate_media_by_place_id(evidence)
+    selected_benchmark_count = sum(
+        candidate.get("benchmark_selected") is True
+        for candidate in competitors.get("competitors", [])
+        if isinstance(candidate, Mapping)
+    )
     formal_cards = "".join(
         _candidate_card(candidate)
         for candidate in competitors.get("competitors", [])
@@ -650,7 +655,7 @@ def render_competitor_report(
     </section>
     <section>
       <h2>2. 正式竞品与房型证据</h2>
-      <p class="muted">正式竞品：{_number(competitors.get('formal_competitor_count'))} 家；候选：{_number(competitors.get('candidate_count'))} 家。</p>
+      <p class="muted">正式竞品：{_number(competitors.get('formal_competitor_count'))} 家；候选：{_number(competitors.get('candidate_count'))} 家；深调标杆：{_number(selected_benchmark_count)} 家（上限 8 家）。</p>
       {formal_cards}
     </section>
     <section>

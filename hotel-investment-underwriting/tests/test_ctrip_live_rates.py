@@ -200,6 +200,67 @@ console.log(JSON.stringify({
         self.assertTrue(value["same"])
         self.assertFalse(value["different"])
 
+    def test_360_benchmark_selection_is_quality_ranked_and_never_exceeds_eight(self) -> None:
+        script = """
+import { benchmarkCandidates } from './collector/playwright_360_map.mjs';
+const make = (id, {photo = false, rooms = 0, rating = 4.5, reviews = 10, distance = 100} = {}) => ({
+  item: {
+    pguid: id, avg_rating: rating, review_count: reviews,
+    detail: { room_types: Array.from({length: rooms}, (_, i) => ({name: `房型${i}`, imgs: photo ? ['https://example.com/room.jpg'] : []})) }
+  }, distance
+});
+const candidates = [
+  make('nearest-low-evidence', {distance: 20}),
+  make('photo-room-high-rating', {photo: true, rooms: 2, rating: 4.9, reviews: 100, distance: 800}),
+  ...Array.from({length: 10}, (_, index) => make(`candidate-${index}`, {photo: true, rooms: 1, rating: 4.0 + index / 100, reviews: index, distance: 100 + index}))
+];
+const selected = benchmarkCandidates(candidates, 99);
+console.log(JSON.stringify({ids: selected.map(({item}) => item.pguid), count: selected.length}));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        value = json.loads(completed.stdout)
+
+        self.assertEqual(8, value["count"])
+        self.assertEqual("photo-room-high-rating", value["ids"][0])
+        self.assertNotIn("nearest-low-evidence", value["ids"])
+
+        zero_script = """
+import { benchmarkCandidates } from './collector/playwright_360_map.mjs';
+console.log(JSON.stringify(benchmarkCandidates([{item:{pguid:'only', detail:{}}, distance:1}], 0).length));
+"""
+        zero_completed = subprocess.run(
+            ["node", "--input-type=module", "-e", zero_script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(0, json.loads(zero_completed.stdout))
+
+    def test_360_candidates_retain_the_confirmed_center_provider_identity(self) -> None:
+        script = """
+import { candidateProvider } from './collector/playwright_360_map.mjs';
+console.log(JSON.stringify(candidateProvider({provider:'360-map-v1'})));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual("360-map-v1", json.loads(completed.stdout))
+
     def test_price_difference_does_not_become_an_adr_offer(self) -> None:
         script = """
 import { networkRates, domRates, matchRates, observation } from './collector/ctrip_live_rates.mjs';

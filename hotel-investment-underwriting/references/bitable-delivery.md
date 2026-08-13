@@ -69,8 +69,12 @@ financial input. Its exact validation rules are in
 ## Host apply contract
 
 1. Create the eight tables once in `manifest.template.tables` order, or verify
-   an existing standard template by table name, record-key field and field
-   names. This lets the two record-link fields resolve their target tables.
+   an existing standard template by table name, record-key field, field type
+   and select options. For an older template, only add missing fields or add
+   the missing select option while preserving all existing options; do not
+   overwrite a field type or delete historical columns. This lets the two
+   record-link fields resolve their target tables and prevents P1/OTA columns
+   from being silently dropped.
 2. For each `manifest.records[table]`, find by the table's `record_key_field`;
    create when absent and patch when present. The same `input_sha256` therefore
    remains idempotent; a changed request creates a new `项目运行ID`.
@@ -81,8 +85,9 @@ financial input. Its exact validation rules are in
    treat it as an image payload; it is a traceability link only. After a
    successful upload, set `附件状态` to `status_after_upload`.
 5. Before writing, verify or migrate the `1.1` fields: summary
-   `交付完整性`/`交付待补项` and child-table `交付状态`. After writeback, read them
-   and attachment counts back. For an eligible manifest, only then update the
+   `交付完整性`/`交付待补项`, child-table `交付状态`, and the full
+   `2km竞品` / `竞品报价与视觉证据` field definitions. After writeback, read every
+   manifest record key, record-link and attachment count back. For an eligible manifest, only then update the
    summary from `待写入核验` to `可交付`; otherwise keep or set `待补证据` and state
    the failed/missing item. Do not mark the project complete when the manifest
    delivery gate is blocked.

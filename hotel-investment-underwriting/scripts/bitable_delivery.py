@@ -941,6 +941,15 @@ def _evidence_records(
         for candidate in analysis.get("competitors", [])
         if isinstance(candidate, Mapping) and candidate.get("provider_place_id")
     }
+    selected_visual_benchmarks = {
+        place_id
+        for place_id, candidate in formal.items()
+        if candidate.get("benchmark_selected") is True
+    }
+    # Historical/manual inputs did not carry an explicit selection marker.
+    # Keep their former all-formal requirement, while page-collected flows only
+    # require visual evidence for the at-most-eight deep-research benchmarks.
+    visual_required_place_ids = selected_visual_benchmarks or set(formal)
     context = analysis.get("pricing_context") if isinstance(analysis.get("pricing_context"), Mapping) else {}
     records: list[dict[str, Any]] = []
     attachments: list[dict[str, Any]] = []
@@ -1134,7 +1143,8 @@ def _evidence_records(
             }
         )
     else:
-        for place_id, candidate in formal.items():
+        for place_id in sorted(visual_required_place_ids):
+            candidate = formal[place_id]
             if place_id in image_evidence_place_ids:
                 continue
             source = (

@@ -36,6 +36,7 @@ _CTRIP_AUTO_MAPPING_PROFILE = "ctrip-live-rates-v1"
 _COVERAGE_STATUSES = {"complete", "partial", "not_collected", "failed"}
 _RESULT_STATUSES = {"complete", "partial", "failed"}
 _BOOKING_PLATFORMS = {"携程"}
+MAX_BENCHMARK_CANDIDATES = 8
 
 
 class MarketEvidenceContractError(ValueError):
@@ -159,6 +160,7 @@ def _validate_candidate_inventory(
         raise MarketEvidenceContractError("collection_request.candidate_inventory must be an array of at most 200 items")
     normalized: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
+    selected_count = 0
     for index, item in enumerate(value):
         path = f"collection_request.candidate_inventory[{index}]"
         raw = _require_mapping(item, path)
@@ -175,6 +177,8 @@ def _validate_candidate_inventory(
         selected = raw.get("benchmark_selected", False)
         if not isinstance(selected, bool):
             raise MarketEvidenceContractError(f"{path}.benchmark_selected must be boolean")
+        if selected:
+            selected_count += 1
         ota_raw = raw.get("ota_property")
         ota: dict[str, str] | None = None
         if ota_raw is not None:
@@ -212,6 +216,11 @@ def _validate_candidate_inventory(
                 "benchmark_selected": selected,
                 **({"ota_property": ota} if ota is not None else {}),
             }
+        )
+    if selected_count > MAX_BENCHMARK_CANDIDATES:
+        raise MarketEvidenceContractError(
+            "collection_request.candidate_inventory may select at most "
+            f"{MAX_BENCHMARK_CANDIDATES} 2km price/visual benchmarks"
         )
     return normalized
 
@@ -281,7 +290,7 @@ def validate_collection_request(value: Any) -> dict[str, Any]:
             search.get("max_benchmark_candidates", 8),
             "collection_request.search.max_benchmark_candidates",
             0,
-            30,
+            MAX_BENCHMARK_CANDIDATES,
         ),
         "max_images_per_candidate": _require_integer(
             search.get("max_images_per_candidate", 1),

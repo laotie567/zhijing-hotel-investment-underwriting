@@ -27,7 +27,7 @@
         "query": {"type": "string", "minLength": 1, "maxLength": 100},
         "radius_meters": {"type": "integer", "minimum": 1, "maximum": 2000},
         "max_candidates": {"type": "integer", "minimum": 1, "maximum": 200},
-        "max_benchmark_candidates": {"type": "integer", "minimum": 0, "maximum": 30},
+        "max_benchmark_candidates": {"type": "integer", "minimum": 0, "maximum": 8},
         "max_images_per_candidate": {"type": "integer", "minimum": 0, "maximum": 4}
       }
     },

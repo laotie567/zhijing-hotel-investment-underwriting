@@ -337,6 +337,25 @@ class BitableDeliveryTests(unittest.TestCase):
         self.assertEqual("待补证据", manifest["delivery_gate"]["status"])
         self.assertFalse(manifest["delivery_gate"]["final_delivery_eligible"])
 
+    def test_delivery_gate_requires_images_only_for_explicit_deep_research_benchmarks(self) -> None:
+        request = self._request()
+        for index, candidate in enumerate(request["competitor_analysis"]["candidates"], start=1):
+            candidate["benchmark_selected"] = index == 1
+        request["competitor_report"]["candidate_media"] = [
+            request["competitor_report"]["candidate_media"][0]
+        ]
+        result = run.run(request, defaults=self.defaults)
+
+        manifest = bitable_delivery.build_manifest(result, request, self.defaults)
+        pending = [
+            row
+            for row in manifest["records"]["竞品报价与视觉证据"]
+            if row["交付状态"] == "待补视觉图片"
+        ]
+
+        self.assertEqual([], pending)
+        self.assertTrue(manifest["delivery_gate"]["final_delivery_eligible"])
+
     def test_partial_competitor_collection_writes_a_visible_collection_gap(self) -> None:
         request = self._request()
         request["competitor_analysis"]["collection_status"] = "partial"
