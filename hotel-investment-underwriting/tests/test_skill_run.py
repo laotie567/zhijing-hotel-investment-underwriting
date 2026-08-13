@@ -59,6 +59,33 @@ def competitor_input() -> dict:
                         "observed_at": "2026-08-12T09:10:00+08:00",
                     }
                 ],
+                "pricing_observations": (
+                    [
+                        {
+                            "room_type": "双人电竞房",
+                            "room_type_provider_id": f"P-{index}:room-2",
+                            "price_type": "P2",
+                            "display_price": price,
+                            "currency": "CNY",
+                            "availability": "available",
+                            "pricing_context": {
+                                "check_in_date": "2026-08-26",
+                                "nights": 1,
+                                "guests": 2,
+                                "currency": "CNY",
+                            },
+                            "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                            "observed_at": "2026-08-12T09:10:00+08:00",
+                            "network_verified": True,
+                            "dom_verified": True,
+                            "price_match": True,
+                            "adr_eligible": False,
+                            "qualification_gaps": ["tax_scope_unknown"],
+                        }
+                    ]
+                    if index == 1
+                    else []
+                ),
             }
         )
     return {
@@ -283,6 +310,8 @@ class SkillRunTests(unittest.TestCase):
         self.assertIn('src="data:image/png;base64,', rendered)
         self.assertNotIn('src="http', rendered)
         self.assertIn("公开房图显示暖色木饰面", rendered)
+        self.assertIn("携程页面价格观察", rendered)
+        self.assertIn("仅供展示：tax_scope_unknown", rendered)
         self.assertIn("2026-08-26", rendered)
         self.assertIn("<h2>3. 视觉竞品对标</h2>", rendered)
         self.assertIn('<article class="visual-card">', rendered)

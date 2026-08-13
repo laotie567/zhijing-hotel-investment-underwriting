@@ -10,6 +10,7 @@ collector/package.json -export-ignore
 collector/package-lock.json -export-ignore
 collector/playwright_360_map.mjs -export-ignore
 collector/ego_ctrip.mjs -export-ignore
+collector/ctrip_live_rates.mjs -export-ignore
 scripts/competitor_analysis.py -export-ignore
 scripts/competitor_report.py -export-ignore
 scripts/bitable_delivery.py -export-ignore

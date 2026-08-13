@@ -5,7 +5,7 @@
 - `SKILL.md`、`agents/openai.yaml`；
 - `VERSION`；
 - `scripts/run.py`、`collect_market_evidence.py`、`market_evidence_contract.py`、`market_evidence_runtime.py`、`input_contract.py`、`competitor_analysis.py`、`competitor_report.py`、`bitable_delivery.py`、`calculate.py`；
-- `collector/` 中锁定的 Playwright 与 Ego Lite 页面采集 Profile 源码；
+- `collector/` 中锁定的 Playwright、Ego Lite 与 Ui.Vision+OpenCLI 携程实时价采集 Profile 源码；
 - `schemas/` 与运行说明所需的 `references/`。
 
 测试、样例、根目录文档、生成结果和旧包均不会进入生产 ZIP。根目录与 Skill
@@ -27,9 +27,9 @@ git archive --format=zip --output hotel-investment-underwriting-vX.Y.Z.zip \
 
 - Python 3.10+；核心测算只依赖标准库；
 - 页面证据采集默认需要 Node 20+、`collector/package-lock.json` 和 Chromium；安装命令见 `references/market-evidence-collection.md`；
-- Mac Mini/Hermes 在首次运行前必须执行 `python3 scripts/collect_market_evidence.py --preflight --all-engines`；Ego Lite 或 Kimi WebBridge 未安装/未连接时，按输出的 `install_hint` 安装并重启 Hermes。Ego Lite 仅用于本机 macOS 认证页面会话，不替代云端采集器；
+- Mac Mini/Hermes 在首次运行前必须执行 `python3 scripts/collect_market_evidence.py --preflight --all-engines`；Ego Lite、Ui.Vision+OpenCLI 或 Kimi WebBridge 未安装/未连接时，按输出的 `install_hint` 安装并重启 Hermes。Ego Lite 与 Ui.Vision+OpenCLI 仅用于本机 macOS 认证页面会话，不替代云端采集器；
 - 宿主安全注入已授权页面来源会话/凭证；Skill 不读取或保存凭证；
-- 宿主按需要保存请求、结果和发送消息；Skill 不要求数据库、状态目录、锁或守护进程。
+- 宿主按需要保存请求、结果和发送消息；Skill 不要求数据库、持久状态目录或守护进程。`ctrip-live-rates` 仅在单次运行期间创建并删除临时浏览器互斥锁。
 
 ## Mac Mini / Hermes 首次安装
 
@@ -49,6 +49,19 @@ Hermes；使用 Kimi WebBridge 时还必须安装并连接扩展、再设置
 `MARKET_EVIDENCE_KIMI_WEBBRIDGE_COMMAND`。未选用的 crawl4ai、xcrawl、OpenCLI
 适配器可以保持 `action_required`，不会妨碍已就绪的 Playwright/Ego Lite 链路。
 
+如选择携程实时价 Profile，则需要单独的 Chrome `ctrip-price-worker` Profile，并在该
+Profile 中安装 OpenCLI Browser Bridge 和 Ui.Vision；管理员正常登录携程、完成验证码和
+Ui.Vision 的本机配对。再安装固定 Bridge 版本：
+
+```bash
+npm install -g uivision-mcp-bridge@1.1.1
+python3 scripts/collect_market_evidence.py --preflight --engine ctrip-live-rates
+```
+
+实时价采集严格由 Ui.Vision 改变页面状态、OpenCLI 只读 Network/DOM；回执不含 Cookie、
+请求头、令牌或原始响应 body。未登录、验证码、房源映射歧义、无库存和页面结构变动会
+返回明确的 `collection_issues`，而非静默写入空报价或伪 ADR。
+
 生产宿主只调用 CLI 或只监听本机的 HTTP 接口，绝不将浏览器操作转嫁给 Codex
 Computer Use：
 
@@ -62,7 +75,7 @@ Ego Lite 登录态仅驻留在这台 Mac Mini。若 OTA 显示“登录看低价
 
 ## 宿主调用顺序
 
-1. 先用 `360-map-v1` 采集中心点和全量同源 2km 候选；再把明确选出的 `benchmark_selected` 候选及其 OTA 实体映射交给 `ctrip-hotel-v1` 或其他明确的报价 Profile。它返回房型/图片、报价覆盖度和页面回执。
+1. 先用 `360-map-v1` 采集中心点和全量同源 2km 候选；再把明确选出的 `benchmark_selected` 候选交给 `ctrip-hotel-v1` 或 `ctrip-live-rates-v1`。前者要求显式 OTA 实体映射；后者只接受唯一精确的携程搜索映射。它返回房型/图片、页面价格观察、严格报价覆盖度和页面回执。
 2. 只有全量候选以及本次标杆集所需的房型、图片、同条件报价覆盖度均为 `complete` 时，才可把 `competitor_analysis.collection_status` 设为 `complete`；否则保留 `partial`。
 3. 把 `--format skill-patch` 输出与项目财务输入组装为统一请求并调用 `scripts/run.py`。
 4. 先读取 `workflow.status`，再展示竞品和财务结果。

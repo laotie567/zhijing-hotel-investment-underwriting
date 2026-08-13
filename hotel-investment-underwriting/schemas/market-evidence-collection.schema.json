@@ -23,7 +23,7 @@
       "additionalProperties": false,
       "required": ["provider_profile", "query", "radius_meters"],
       "properties": {
-        "provider_profile": {"enum": ["360-map-v1", "ctrip-hotel-v1"]},
+        "provider_profile": {"enum": ["360-map-v1", "ctrip-hotel-v1", "ctrip-live-rates-v1"]},
         "query": {"type": "string", "minLength": 1, "maxLength": 100},
         "radius_meters": {"type": "integer", "minimum": 1, "maximum": 2000},
         "max_candidates": {"type": "integer", "minimum": 1, "maximum": 200},

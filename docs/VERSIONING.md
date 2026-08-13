@@ -1,15 +1,15 @@
 # 版本与发布
 
-当前开发版本为 `0.12.0`。生产发布物只有
+当前开发版本为 `0.13.0`。生产发布物只有
 `hotel-investment-underwriting/`，其包内 `VERSION` 是唯一版本来源：
 
 | 项目 | 当前状态 |
 |---|---|
-| 单一 Skill 入口 | `hotel-investment-underwriting/0.12.0` |
+| 单一 Skill 入口 | `hotel-investment-underwriting/0.13.0` |
 | 财务计算器 | 3.1.0，保留并由 Golden Master 锁定 |
 | 财务输入契约 | `project-input.schema.json` |
 | 2km 竞品请求契约 | `skill-request.schema.json` |
-| 页面市场证据契约 | `market-evidence-collection/v1`；全量地图 Playwright Profile + Ego Lite OTA Profile，Kimi WebBridge/crawl4ai/xcrawl/OpenCLI 可替换 |
+| 页面市场证据契约 | `market-evidence-collection/v1`；全量地图 Playwright Profile + Ego Lite OTA Profile + Ui.Vision/OpenCLI 携程实时价 Profile，Kimi WebBridge/crawl4ai/xcrawl 可替换 |
 | 竞品调研交付 | `--format html` 的独立单文件 HTML，含视觉竞品对标区 |
 | 飞书多维表格交付 | `--format bitable` 的标准八表无凭证 manifest；宿主应用它，不重复计算，并以 `delivery_gate` 防止静默空表被当作完整交付 |
 

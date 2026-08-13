@@ -30,6 +30,10 @@ EXTERNAL_ENGINE_ENVIRONMENT = {
     "xcrawl": "MARKET_EVIDENCE_XCRAWL_COMMAND",
     "opencli": "MARKET_EVIDENCE_OPENCLI_COMMAND",
 }
+CTRIP_UIVISION_INSTALL_URL = "https://chromewebstore.google.com/detail/ui-vision-rpa/gcbalfbdmfieckjlnblleoemohcganoc"
+OPENCLI_INSTALL_URL = "https://github.com/jackwener/OpenCLI"
+UIVISION_BRIDGE_PACKAGE = "uivision-mcp-bridge"
+UIVISION_MCP_TOKEN_FILE = Path.home() / ".uivision_mcp_token"
 
 
 def _status(
@@ -151,6 +155,151 @@ def _playwright_status() -> dict[str, Any]:
     return _status("ready", "Bundled Playwright runtime and Chromium browser are available.")
 
 
+def _ctrip_live_rates_status() -> dict[str, Any]:
+    """Check only deployment prerequisites; never open a booking page or read a session."""
+
+    chrome_path = Path("/Applications/Google Chrome.app")
+    chrome_ready = chrome_path.exists()
+    opencli = shutil.which("opencli")
+    bridge = shutil.which(UIVISION_BRIDGE_PACKAGE)
+    details: dict[str, Any] = {
+        "chrome": {"ready": chrome_ready, "path": str(chrome_path) if chrome_ready else None},
+        "opencli": {"ready": opencli is not None, "executable": opencli},
+        "uivision_bridge": {"ready": bridge is not None, "executable": bridge},
+        "profile": "ctrip-price-worker",
+    }
+    if not chrome_ready:
+        return _status(
+            "action_required",
+            "Google Chrome is required for the Ctrip live-rate worker.",
+            install_hint="Install Google Chrome, then create the ctrip-price-worker profile.",
+            details=details,
+        )
+    if opencli is None:
+        return _status(
+            "action_required",
+            "OpenCLI is unavailable for the Ctrip live-rate worker.",
+            install_hint=f"Install OpenCLI and its Browser Bridge: {OPENCLI_INSTALL_URL}",
+            details=details,
+        )
+    if bridge is None:
+        return _status(
+            "action_required",
+            "Ui.Vision MCP Bridge is unavailable; no page action will be attempted.",
+            install_hint=(
+                f"Install Ui.Vision in the dedicated Chrome profile ({CTRIP_UIVISION_INSTALL_URL}), "
+                f"then install {UIVISION_BRIDGE_PACKAGE} globally and pair its local bridge."
+            ),
+            details=details,
+        )
+    if not UIVISION_MCP_TOKEN_FILE.is_file():
+        return _status(
+            "action_required",
+            "Ui.Vision has not been paired with its local MCP Bridge yet.",
+            install_hint=(
+                "Start the installed Ui.Vision MCP Bridge once to obtain the local pairing token, "
+                "paste it in Ui.Vision Settings > AI in ctrip-price-worker, then retry preflight."
+            ),
+            details=details,
+        )
+    try:
+        probe = subprocess.run(
+            [opencli, "doctor"],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        probe = None
+    if probe is None or probe.returncode != 0 or "Extension: connected" not in probe.stdout:
+        return _status(
+            "action_required",
+            "OpenCLI Browser Bridge is not connected to the dedicated Chrome profile.",
+            install_hint="Open Chrome with the ctrip-price-worker profile, enable OpenCLI Browser Bridge, then retry.",
+            details=details,
+        )
+    bridge_probe = _probe_uivision_bridge(bridge)
+    if bridge_probe is not True:
+        return _status(
+            "action_required",
+            "Ui.Vision MCP Bridge is installed but the Ui.Vision extension is not paired/connected.",
+            install_hint=(
+                "Open Ui.Vision in the ctrip-price-worker Chrome profile, enable its MCP Bridge, "
+                "paste the existing local pairing token and keep the side panel open."
+            ),
+            details=details,
+        )
+    return _status(
+        "ready",
+        "Chrome, OpenCLI Browser Bridge and a paired Ui.Vision MCP Bridge are ready. A live Ctrip run still requires a manually authenticated session.",
+        details=details,
+    )
+
+
+def _probe_uivision_bridge(executable: str) -> bool | None:
+    """Check only local pairing; never print or return the bridge token.
+
+    The official bridge serves MCP over stdio and exposes `bridge_status`
+    without navigating a page. We call it only after the token file already
+    exists, so preflight cannot create a new credential as a side effect.
+    """
+
+    messages = "\n".join(
+        (
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "zhijing-market-evidence-preflight", "version": "1"},
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": "bridge_status", "arguments": {}},
+                }
+            ),
+            "",
+        )
+    )
+    try:
+        process = subprocess.run(
+            [executable],
+            input=messages,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+            timeout=12,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if process.returncode != 0:
+        return None
+    try:
+        responses = [json.loads(line) for line in process.stdout.splitlines() if line.strip()]
+    except json.JSONDecodeError:
+        return None
+    for response in responses:
+        if response.get("id") != 2:
+            continue
+        content = response.get("result", {}).get("content", [])
+        text = "\n".join(
+            item.get("text", "") for item in content if isinstance(item, dict) and isinstance(item.get("text"), str)
+        )
+        return "extension is CONNECTED" in text and "NOT connected" not in text
+    return None
+
+
 def _kimi_daemon_status() -> dict[str, Any]:
     if not KIMI_EXECUTABLE.is_file():
         return _status(
@@ -201,6 +350,8 @@ def check_engine(engine: str) -> dict[str, Any]:
         return _ego_status()
     if engine == "playwright":
         return _playwright_status()
+    if engine == "ctrip-live-rates":
+        return _ctrip_live_rates_status()
     if engine == "kimi-webbridge":
         adapter = _configured_command(engine)
         daemon = _kimi_daemon_status()

@@ -224,6 +224,15 @@ def _candidate_result(candidate: Any, center: Mapping[str, Any]) -> dict[str, An
         "pending_fields": pending,
         "source": source,
         "room_offers": candidate.get("room_offers") if isinstance(candidate.get("room_offers"), list) else [],
+        # P1/P2/P3 observations remain visible to a user even when the strict
+        # ADR gate rejects them (for example tax scope or machine-count is not
+        # proven). They never enter `_pricing_summary`, which consumes only
+        # `room_offers` after `_valid_offer` succeeds.
+        "pricing_observations": (
+            candidate.get("pricing_observations")
+            if isinstance(candidate.get("pricing_observations"), list)
+            else []
+        ),
         "benchmark_selected": candidate.get("benchmark_selected") is True,
         "booking_evidence": (
             candidate.get("booking_evidence")

@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 CONTRACT_VERSION = "market-evidence-collection/v1"
 SUPPORTED_ENGINES = {
+    "ctrip-live-rates",
     "ego-browser",
     "playwright",
     "kimi-webbridge",
@@ -26,6 +27,12 @@ SUPPORTED_ENGINES = {
     "xcrawl",
     "opencli",
 }
+SUPPORTED_PROVIDER_PROFILES = {
+    "360-map-v1",
+    "ctrip-hotel-v1",
+    "ctrip-live-rates-v1",
+}
+_CTRIP_AUTO_MAPPING_PROFILE = "ctrip-live-rates-v1"
 _COVERAGE_STATUSES = {"complete", "partial", "not_collected", "failed"}
 _RESULT_STATUSES = {"complete", "partial", "failed"}
 _BOOKING_PLATFORMS = {"携程"}
@@ -135,7 +142,9 @@ def _validate_center(value: Any, path: str) -> dict[str, Any]:
     }
 
 
-def _validate_candidate_inventory(value: Any) -> list[dict[str, Any]]:
+def _validate_candidate_inventory(
+    value: Any, *, allow_automatic_ota_mapping: bool = False
+) -> list[dict[str, Any]]:
     """Validate the cross-page identity bridge used by OTA profiles.
 
     The map profile owns the full 2km candidate population.  A booking profile
@@ -193,7 +202,7 @@ def _validate_candidate_inventory(value: Any) -> list[dict[str, Any]]:
                     ota_mapping.get("matched_at"), f"{path}.ota_property.matched_at"
                 ),
             }
-        if selected and ota is None:
+        if selected and ota is None and not allow_automatic_ota_mapping:
             raise MarketEvidenceContractError(
                 f"{path}.ota_property is required for a selected price/visual benchmark"
             )
@@ -281,6 +290,10 @@ def validate_collection_request(value: Any) -> dict[str, Any]:
             4,
         ),
     }
+    if normalized_search["provider_profile"] not in SUPPORTED_PROVIDER_PROFILES:
+        raise MarketEvidenceContractError(
+            "collection_request.search.provider_profile is unsupported"
+        )
 
     context = _require_mapping(raw.get("pricing_context"), "collection_request.pricing_context")
     _reject_unknown(
@@ -324,7 +337,12 @@ def validate_collection_request(value: Any) -> dict[str, Any]:
         "search": normalized_search,
         "pricing_context": normalized_context,
         "required_evidence": normalized_required,
-        "candidate_inventory": _validate_candidate_inventory(raw.get("candidate_inventory")),
+        "candidate_inventory": _validate_candidate_inventory(
+            raw.get("candidate_inventory"),
+            allow_automatic_ota_mapping=(
+                normalized_search["provider_profile"] == _CTRIP_AUTO_MAPPING_PROFILE
+            ),
+        ),
     }
     if "request_id" in raw:
         normalized["request_id"] = _require_text(raw["request_id"], "collection_request.request_id", maximum=200)
@@ -346,6 +364,43 @@ def _validate_coverage(value: Any, path: str) -> dict[str, Any]:
     return normalized
 
 
+_COLLECTION_ISSUE_CODES = {
+    "AUTH_REQUIRED",
+    "BROWSER_DISCONNECTED",
+    "CAPTCHA_REQUIRED",
+    "DOM_SCHEMA_DRIFT",
+    "HOTEL_MAPPING_AMBIGUOUS",
+    "NO_INVENTORY",
+    "NETWORK_SCHEMA_DRIFT",
+    "OPENCLI_UNAVAILABLE",
+    "PRICE_MISMATCH",
+    "QUERY_MISMATCH",
+    "RATE_LOAD_TIMEOUT",
+    "RPA_FAILED",
+    "UIVISION_UNPAIRED",
+}
+
+
+def _validate_collection_issue(value: Any, path: str) -> dict[str, Any]:
+    raw = _require_mapping(value, path)
+    _reject_unknown(raw, {"code", "message", "retryable", "provider_place_id"}, path)
+    code = raw.get("code")
+    if code not in _COLLECTION_ISSUE_CODES:
+        raise MarketEvidenceContractError(f"{path}.code is invalid")
+    normalized: dict[str, Any] = {
+        "code": code,
+        "message": _require_text(raw.get("message"), f"{path}.message", maximum=500),
+        "retryable": raw.get("retryable"),
+    }
+    if not isinstance(normalized["retryable"], bool):
+        raise MarketEvidenceContractError(f"{path}.retryable must be boolean")
+    if "provider_place_id" in raw:
+        normalized["provider_place_id"] = _require_text(
+            raw["provider_place_id"], f"{path}.provider_place_id", maximum=200
+        )
+    return normalized
+
+
 def validate_collection_result(value: Any) -> dict[str, Any]:
     """Validate an adapter response before an agent merges it into Skill input."""
 
@@ -360,6 +415,7 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
             "target_resolution",
             "coverage",
             "collection_gaps",
+            "collection_issues",
             "competitor_analysis",
             "competitor_report",
         },
@@ -427,6 +483,13 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
     gaps = raw.get("collection_gaps", [])
     if not isinstance(gaps, list) or any(not isinstance(item, str) or not item.strip() for item in gaps):
         raise MarketEvidenceContractError("collection_result.collection_gaps must be a string array")
+    issues = raw.get("collection_issues", [])
+    if not isinstance(issues, list) or len(issues) > 500:
+        raise MarketEvidenceContractError("collection_result.collection_issues is invalid")
+    normalized_issues = [
+        _validate_collection_issue(item, f"collection_result.collection_issues[{index}]")
+        for index, item in enumerate(issues)
+    ]
     analysis = _require_mapping(raw.get("competitor_analysis"), "collection_result.competitor_analysis")
     report = _require_mapping(raw.get("competitor_report"), "collection_result.competitor_report")
     if raw["status"] == "complete" and any(
@@ -442,6 +505,7 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
         "target_resolution": normalized_target,
         "coverage": normalized_coverage,
         "collection_gaps": [item.strip() for item in gaps],
+        "collection_issues": normalized_issues,
         "competitor_analysis": dict(analysis),
         "competitor_report": dict(report),
     }

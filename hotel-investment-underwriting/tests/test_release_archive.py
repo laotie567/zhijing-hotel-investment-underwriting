@@ -46,6 +46,7 @@ PUBLISHED_FILES = {
     f"{SKILL_PREFIX}collector/package-lock.json",
     f"{SKILL_PREFIX}collector/playwright_360_map.mjs",
     f"{SKILL_PREFIX}collector/ego_ctrip.mjs",
+    f"{SKILL_PREFIX}collector/ctrip_live_rates.mjs",
 }
 
 

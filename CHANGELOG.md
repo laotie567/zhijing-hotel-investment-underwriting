@@ -1,5 +1,23 @@
 # 变更记录
 
+## 0.13.0 - 2026-08-13
+
+### Added
+
+- 新增内置 `ctrip-live-rates` / `ctrip-live-rates-v1`：以专用 Chrome `ctrip-price-worker` Profile 采集已登录携程的页面价格、房型、可订状态和公开图片。Ui.Vision 是唯一页面动作执行者，OpenCLI 只读 Network/DOM；不依赖 Codex Computer Use。
+- 新增唯一精确的携程实体映射：缺少 `ota_property` 时，仅接受 `opencli ctrip search` 的单一精确名称结果，生成可追溯 OTA ID/URL；零个或多个结果返回 `HOTEL_MAPPING_AMBIGUOUS`。
+- 新增结构化 `collection_issues`，覆盖 Ui.Vision 未配对、登录/验证码、无库存、查询条件不一致、Network/DOM 价格不一致及页面动作失败；不会再以空报价掩盖失败。
+- HTML 与飞书“竞品报价与视觉证据”新增页面价格观察、P1/P2/P3 级别、Network/DOM 验证、价格一致性、ADR 资格及排除原因。
+
+### Guardrails
+
+- 页面价格先作为 `pricing_observations` 交付。只有完全相同的入住条件、Network/DOM 一致、可订、税费、取消政策和机位数全部成立时，才写入严格 `room_offers`，并仍须满足三家独立竞品规则后才形成 ADR。
+- 实时价 Worker 使用临时单任务锁；回执和诊断不输出 Cookie、请求头、令牌或原始 Network body。`NO_INVENTORY` 作为已验证负向结果保留，绝不伪造价格。
+
+### Validation
+
+- 新增实时价 Profile、自动映射、双证据一致性、价格冲突拒绝、结构化问题、HTML/飞书页面价格观察和发布归档白名单的回归测试；全套 95 项测试、Skill 结构校验及发布归档检查通过。
+
 ## 0.12.0 - 2026-08-13
 
 ### Added

@@ -303,7 +303,7 @@ def standard_template() -> dict[str, Any]:
                 _link("关联项目运行", "项目测算总表"),
                 _link("关联竞品", "2km竞品"),
                 _select("交付状态", _DELIVERY_RECORD_STATUSES),
-                _select("证据类型", ("报价", "视觉")),
+                _select("证据类型", ("报价", "价格观察", "视觉")),
                 _text("竞品记录ID"),
                 _text("竞品名称"),
                 _text("OTA平台"),
@@ -312,9 +312,15 @@ def standard_template() -> dict[str, Any]:
                 _text("房型来源ID"),
                 _number("机位数", precision=0),
                 _number("报价（元/晚）", currency=True),
+                _text("价格级别"),
                 _select("可订状态", ("available", "sold_out", "unknown")),
                 _text("税费口径"),
                 _text("取消政策"),
+                {"type": "checkbox", "name": "Network已验证"},
+                {"type": "checkbox", "name": "DOM已验证"},
+                {"type": "checkbox", "name": "价格一致"},
+                {"type": "checkbox", "name": "可进入ADR"},
+                _text("ADR排除原因"),
                 _text("入住日期"),
                 _number("晚数", precision=0),
                 _number("入住人数", precision=0),
@@ -969,18 +975,62 @@ def _evidence_records(
                         "房型来源ID": offer.get("room_type_provider_id"),
                         "机位数": offer.get("workstations"),
                         "报价（元/晚）": offer.get("nightly_price"),
+                        "价格级别": "P2",
                         "可订状态": offer.get("availability"),
                         "税费口径": (
                             "含税" if offer.get("tax_included") is True else
                             ("不含税/另付税费" if offer.get("tax_included") is False else None)
                         ),
                         "取消政策": offer.get("cancellation_policy"),
+                        "Network已验证": True,
+                        "DOM已验证": True,
+                        "价格一致": True,
+                        "可进入ADR": True,
                         "入住日期": offer.get("pricing_context", context).get("check_in_date") if isinstance(offer.get("pricing_context", context), Mapping) else context.get("check_in_date"),
                         "晚数": offer.get("pricing_context", context).get("nights") if isinstance(offer.get("pricing_context", context), Mapping) else context.get("nights"),
                         "入住人数": offer.get("pricing_context", context).get("guests") if isinstance(offer.get("pricing_context", context), Mapping) else context.get("guests"),
                         "币种": offer.get("currency") or context.get("currency"),
                         "来源URL": offer.get("source_url") or source.get("source_url"),
                         "采集时间": offer.get("observed_at") or source.get("observed_at"),
+                        "证据置信度": source.get("confidence"),
+                        "附件状态": "无附件",
+                    }
+                )
+            )
+        for index, observation in enumerate(candidate.get("pricing_observations", []), start=1):
+            if not isinstance(observation, Mapping):
+                continue
+            observation_id = _record_key(run_id, "price_observation", place_id, index)
+            raw_gaps = observation.get("qualification_gaps")
+            gaps = "；".join(str(item) for item in raw_gaps) if isinstance(raw_gaps, list) else None
+            records.append(
+                _omit_none(
+                    {
+                        "证据记录ID": observation_id,
+                        "交付状态": "已提供",
+                        "证据类型": "价格观察",
+                        "竞品记录ID": competitor_keys.get(place_id),
+                        "竞品名称": candidate.get("name") or place_id,
+                        "OTA平台": booking.get("platform"),
+                        "OTA酒店ID": booking.get("property_id"),
+                        "房型": observation.get("room_type"),
+                        "房型来源ID": observation.get("room_type_provider_id"),
+                        "机位数": observation.get("workstations"),
+                        "报价（元/晚）": observation.get("display_price"),
+                        "价格级别": observation.get("price_type"),
+                        "可订状态": observation.get("availability"),
+                        "取消政策": observation.get("cancellation_policy"),
+                        "Network已验证": observation.get("network_verified"),
+                        "DOM已验证": observation.get("dom_verified"),
+                        "价格一致": observation.get("price_match"),
+                        "可进入ADR": observation.get("adr_eligible"),
+                        "ADR排除原因": gaps,
+                        "入住日期": observation.get("pricing_context", context).get("check_in_date") if isinstance(observation.get("pricing_context", context), Mapping) else context.get("check_in_date"),
+                        "晚数": observation.get("pricing_context", context).get("nights") if isinstance(observation.get("pricing_context", context), Mapping) else context.get("nights"),
+                        "入住人数": observation.get("pricing_context", context).get("guests") if isinstance(observation.get("pricing_context", context), Mapping) else context.get("guests"),
+                        "币种": observation.get("currency") or context.get("currency"),
+                        "来源URL": observation.get("source_url") or source.get("source_url"),
+                        "采集时间": observation.get("observed_at") or source.get("observed_at"),
                         "证据置信度": source.get("confidence"),
                         "附件状态": "无附件",
                     }

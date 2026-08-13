@@ -64,6 +64,33 @@ def complete_competitor_input() -> dict:
                         "observed_at": "2026-08-12T09:10:00+08:00",
                     }
                 ],
+                "pricing_observations": (
+                    [
+                        {
+                            "room_type": "双人电竞房",
+                            "room_type_provider_id": f"P-{index}:room-2",
+                            "price_type": "P2",
+                            "display_price": price,
+                            "currency": "CNY",
+                            "availability": "available",
+                            "pricing_context": {
+                                "check_in_date": "2026-08-26",
+                                "nights": 1,
+                                "guests": 2,
+                                "currency": "CNY",
+                            },
+                            "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                            "observed_at": "2026-08-12T09:10:00+08:00",
+                            "network_verified": True,
+                            "dom_verified": True,
+                            "price_match": True,
+                            "adr_eligible": False,
+                            "qualification_gaps": ["tax_scope_unknown"],
+                        }
+                    ]
+                    if index == 1
+                    else []
+                ),
                 "market_profile": {
                     "meituan_badge": "金冠",
                     "opening_or_renovation": "2025年装修",
@@ -229,7 +256,11 @@ class BitableDeliveryTests(unittest.TestCase):
         self.assertEqual("P-1-room-1.png", manifest["attachments"][0]["filename"])
         self.assertEqual("已上传", manifest["attachments"][0]["status_after_upload"])
         self.assertIn("报价", {row["证据类型"] for row in evidence})
+        self.assertIn("价格观察", {row["证据类型"] for row in evidence})
         self.assertIn("视觉", {row["证据类型"] for row in evidence})
+        observation = next(row for row in evidence if row["证据类型"] == "价格观察")
+        self.assertFalse(observation["可进入ADR"])
+        self.assertEqual("tax_scope_unknown", observation["ADR排除原因"])
 
     def test_attachment_file_extension_and_name_are_safe_for_the_validated_image_types(self) -> None:
         self.assertEqual("jpg", bitable_delivery._image_extension("data:image/jpeg;base64,AA=="))

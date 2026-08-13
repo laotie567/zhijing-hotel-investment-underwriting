@@ -55,13 +55,14 @@ python3 ../scripts/collect_market_evidence.py \
 `--serve 127.0.0.1:8791` 提供 `POST /v1/collect` 和
 `POST /v1/collect/skill-patch`。服务只监听本机，不保存请求、凭证或客户资料。
 
-Ego Lite、Kimi WebBridge、crawl4ai、xcrawl、OpenCLI 是同等的正式页面采集引擎，不是
+Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl、OpenCLI 是同等的正式页面采集引擎，不是
 模型的隐式能力。宿主选择其中一个时，设置对应命令环境变量；命令接收本契约 JSON
 的 stdin，并返回同一份结果 JSON：
 
 | 引擎 | 环境变量 |
 |---|---|
 | Ego Lite | 内置 `ego-browser` / `ctrip-hotel-v1`（无环境变量） |
+| Ui.Vision + OpenCLI | 内置 `ctrip-live-rates` / `ctrip-live-rates-v1`（无环境变量） |
 | Kimi WebBridge | `MARKET_EVIDENCE_KIMI_WEBBRIDGE_COMMAND` |
 | crawl4ai | `MARKET_EVIDENCE_CRAWL4AI_COMMAND` |
 | xcrawl | `MARKET_EVIDENCE_XCRAWL_COMMAND` |
@@ -91,6 +92,20 @@ Ego Lite、Kimi WebBridge、crawl4ai、xcrawl、OpenCLI 是同等的正式页面
 房源/房型 ID、房型、机位数、可订状态、每晚含税/取消口径价格、完全相同的
 `pricing_context`、来源 URL 和带时区采集时间。缺任一项的页面价格只能作为原始
 观察，不能进入 ADR 中位数或财务输入。
+
+`ctrip-live-rates-v1` 是携程实时价的生产 Profile。它需要 Chrome 中独立的
+`ctrip-price-worker` Profile、人工完成的携程登录、Ui.Vision 与 OpenCLI Browser
+Bridge。Ui.Vision 是**唯一**页面动作执行者；OpenCLI 只绑定同一标签页，读取动作前后
+的 Network 与 DOM。系统不读取 Cookie、请求头、令牌或原始 Network body。若没有显式
+`ota_property`，它只通过 `opencli ctrip search` 的唯一精确名称结果创建映射；多个或零个
+结果均返回 `HOTEL_MAPPING_AMBIGUOUS`，不猜测。
+
+该 Profile 把真实页面所见的 P1/P2/P3 记录为 `pricing_observations`，供 HTML 与飞书
+展示；只有 P2 同时满足完全相同的报价条件、Network/DOM 价格一致、可订、税费、取消
+政策及机位数时，才另写入严格的 `room_offers` 并可参与 ADR。`NO_INVENTORY` 是已完成的
+负向采集结果，不以空表或虚构价格代替；`AUTH_REQUIRED`、`CAPTCHA_REQUIRED`、
+`QUERY_MISMATCH`、`PRICE_MISMATCH`、`NETWORK_SCHEMA_DRIFT` 等以结构化
+`collection_issues` 返回。
 
 ## 与测算 Skill 对接
 

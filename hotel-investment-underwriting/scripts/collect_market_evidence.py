@@ -27,6 +27,7 @@ import market_evidence_runtime
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _PLAYWRIGHT_RUNNER = _PACKAGE_ROOT / "collector" / "playwright_360_map.mjs"
 _EGO_RUNNER = _PACKAGE_ROOT / "collector" / "ego_ctrip.mjs"
+_CTRIP_LIVE_RATES_RUNNER = _PACKAGE_ROOT / "collector" / "ctrip_live_rates.mjs"
 _EXTERNAL_ENGINE_ENVIRONMENT = {
     "kimi-webbridge": "MARKET_EVIDENCE_KIMI_WEBBRIDGE_COMMAND",
     "crawl4ai": "MARKET_EVIDENCE_CRAWL4AI_COMMAND",
@@ -185,6 +186,12 @@ def collect(request: dict[str, Any], *, engine: str, timeout_seconds: int) -> di
         )
     elif engine == "ego-browser":
         response = _run_ego_browser(normalized, timeout_seconds)
+    elif engine == "ctrip-live-rates":
+        if not _CTRIP_LIVE_RATES_RUNNER.is_file():
+            raise CollectionExecutionError("bundled Ctrip live-rate collector is missing")
+        response = _run_process(
+            ["node", str(_CTRIP_LIVE_RATES_RUNNER)], normalized, timeout_seconds
+        )
     else:
         environment_key = _EXTERNAL_ENGINE_ENVIRONMENT.get(engine)
         if environment_key is None:

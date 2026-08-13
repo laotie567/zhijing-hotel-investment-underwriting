@@ -320,6 +320,30 @@ def _offer_rows(candidate: Mapping[str, Any]) -> list[list[str]]:
     return offer_rows
 
 
+def _observation_rows(candidate: Mapping[str, Any]) -> list[list[str]]:
+    """Show page-observed prices without promoting them into the ADR model."""
+
+    rows = []
+    for observation in candidate.get("pricing_observations", []):
+        if not isinstance(observation, Mapping):
+            continue
+        verified = "Network+DOM 已核验" if observation.get("price_match") else "待核验/存在差异"
+        qualification_gaps = observation.get("qualification_gaps")
+        gaps = "、".join(str(item) for item in qualification_gaps) if isinstance(qualification_gaps, list) else ""
+        adr_scope = "可计入 ADR" if observation.get("adr_eligible") is True else (f"仅供展示：{gaps or '口径未齐'}")
+        rows.append(
+            [
+                _text(observation.get("room_type") or "未命名房型"),
+                _text(observation.get("price_type") or "页面价格"),
+                _number(observation.get("display_price")),
+                _text(observation.get("availability") or "unknown"),
+                verified,
+                adr_scope,
+            ]
+        )
+    return rows
+
+
 def _candidate_card(candidate: Mapping[str, Any]) -> str:
     name = _text(candidate.get("name") or candidate.get("provider_place_id") or "未命名候选")
     source = candidate.get("source") if isinstance(candidate.get("source"), Mapping) else {}
@@ -343,6 +367,8 @@ def _candidate_card(candidate: Mapping[str, Any]) -> str:
         f"{_table(['字段', '值'], detail_rows)}"
         '<h4>已采集房型与报价</h4>'
         f"{_table(['房型', '机位', '同条件房价（元）'], _offer_rows(candidate))}"
+        '<h4>携程页面价格观察</h4>'
+        f"{_table(['房型', '价格级别', '页面价格（元）', '可订状态', '双证据', 'ADR 资格'], _observation_rows(candidate))}"
         "</article>"
     )
 
