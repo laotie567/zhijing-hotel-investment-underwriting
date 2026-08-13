@@ -48,6 +48,10 @@ logs/
 *.zip
 dist/
 
+# Optional local runtime for the page-collection adapter. The release archive
+# contains its locked manifest and source, never a machine-specific browser.
+hotel-investment-underwriting/collector/node_modules/
+
 # Office temporary files
 ~$*.xlsx
 ~$*.docx

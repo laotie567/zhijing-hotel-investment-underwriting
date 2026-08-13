@@ -1,0 +1,66 @@
+{
+  "contract_version": "market-evidence-collection/v1",
+  "request_id": "ctrip-smoke-001",
+  "target": {
+    "name": "笨酒店",
+    "address": "成都市成华区望平街滨河路6号",
+    "city_id": "510100",
+    "center": {
+      "provider": "360地图",
+      "provider_place_id": "target-place",
+      "coordinate_system": "GCJ-02",
+      "longitude": 104.089545,
+      "latitude": 30.654181,
+      "status": "confirmed"
+    }
+  },
+  "search": {
+    "provider_profile": "ctrip-hotel-v1",
+    "query": "电竞酒店",
+    "radius_meters": 2000,
+    "max_candidates": 1,
+    "max_benchmark_candidates": 1,
+    "max_images_per_candidate": 1
+  },
+  "pricing_context": {
+    "check_in_date": "2026-08-20",
+    "nights": 1,
+    "guests": 2,
+    "currency": "CNY"
+  },
+  "required_evidence": {
+    "room_types": true,
+    "images": true,
+    "pricing": true,
+    "benchmark_set": true
+  },
+  "candidate_inventory": [
+    {
+      "candidate": {
+        "provider": "360地图",
+        "provider_place_id": "ctrip-smoke-place",
+        "name": "博狮电竞酒店（成都春熙路太古里店）",
+        "coordinate_system": "GCJ-02",
+        "longitude": 104.0801,
+        "latitude": 30.6582,
+        "property_kind": "lodging",
+        "esports_positioning": "primary",
+        "operating_status": "operating",
+        "source": {
+          "source_platform": "360地图页面（聚合公开酒店资料）",
+          "source_url": "https://m.map.360.cn/m/search/detail/pid=ctrip-smoke-place",
+          "observed_at": "2026-08-13T09:00:00+08:00",
+          "confidence": "medium"
+        }
+      },
+      "benchmark_selected": true,
+      "ota_property": {
+        "platform": "携程",
+        "property_id": "100962994",
+        "property_url": "https://m.ctrip.com/html5/hotel/hoteldetail/100962994.html",
+        "match_method": "page_exact_manual_smoke",
+        "matched_at": "2026-08-13T09:00:00+08:00"
+      }
+    }
+  ]
+}

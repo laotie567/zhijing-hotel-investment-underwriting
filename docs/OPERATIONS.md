@@ -3,9 +3,9 @@
 ## 日常流程
 
 1. 收集地址、计划改造房量、合同/成本/收入假设。
-2. 由宿主确认地图点位；存在歧义时让用户选择。
-3. 收集同一地图 `provider` 的 2km 候选，并提供最小来源事实、可用房型报价和统一的 `pricing_context`。
-4. 执行 `scripts/run.py`。
+2. 由宿主调用 `scripts/collect_market_evidence.py`；存在歧义时让用户选择同源地图点位后重试。
+3. 读取页面采集回执的五项覆盖度。候选必须完成全量 2km 收集；标杆集、房型、图片和同条件报价按选中的价格/视觉标杆核验。任一要求未满足则保留 `partial`，先补证。
+4. 将其 `skill-patch` 合并进项目财务输入，执行 `scripts/run.py`。
 5. 先看竞品状态，再看财务结论；需要时补充数据并重新运行。
 6. 需要交付竞品调研时，以同一请求执行 `--format html > competitor-research.html`；将该单文件交给业务方，无需一并交付 Skill 目录。
 7. 需要飞书多维表格交付时，以同一请求执行 `--format bitable > bitable-delivery.json`；由获得该 Base 写权限的宿主校验八张标准表后，按清单中的记录键写入、解析关联、再上传内嵌图片。
@@ -22,10 +22,13 @@
 ## 常见问题
 
 - 无法确认地址：不要让模型猜坐标；请求更精确地址或用户选择地图候选。
+- 页面采集器不可用或 Profile 返回的页面结构变更：不要静默换源或回填旧数据；记录引擎/Profile/页面回执，修复或切换为另一个明确配置的页面引擎后重跑。
+- 新 Mac Mini/Hermes：先执行 `collect_market_evidence.py --preflight --all-engines`；若 Ego Lite/Kimi WebBridge 不在 `ready`，将 `install_hint` 展示给管理员并停止相应采集，不得伪造登录态或降级为无口径报价。
+- 需要验证“不依赖 Codex Computer Use”的部署：以同一请求分别运行 `--engine playwright` 与 `--engine ego-browser`，检查两个页面回执和 `collector.engine`；不要使用桌面操作录屏或模型摘录替代 CLI 输出。完整步骤见 `END_TO_END_ACCEPTANCE.md`。
 - 2km 内没有合格竞品：如采集标记为 `complete`，这是有效结论；不要扩大半径来凑样本。
 - 有竞品但同机位少于三家独立物业：展示竞品，不输出对应机位 ADR 建议。
 - 有三个低置信度报价但没有三个中/高置信度报价：展示全部竞品和低置信度排除数，不输出对应机位 ADR 建议。
-- 报价不是同一入住日期、晚数、人数或币种：不要混合报价；补齐一次统一的 `pricing_context` 后重跑。
+- 报价不是同一入住日期、晚数、人数、币种或可订状态：不要混合报价；补齐一次统一的 `pricing_context` 后以页面 Profile 重跑。
 - 候选地图 `provider` 与中心点不同：不要混合地图实体 ID；从中心点的同一 provider 重新取候选。
 - 报价已过宿主规定的采集有效期：重新采集并更新 `observed_at`，不要复用旧价格形成建议 ADR。
 - 竞品 ADR 与财务输入不同：这是预期行为；由审核人显式选择模型输入后重跑。

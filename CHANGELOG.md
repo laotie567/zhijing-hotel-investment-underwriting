@@ -1,5 +1,56 @@
 # 变更记录
 
+## 0.12.0 - 2026-08-13
+
+### Added
+
+- 新增 `ego-browser` / `ctrip-hotel-v1` 正式 OTA 页面采集 Profile：使用 Ego Lite 的隔离、已登录浏览器 Space 采集已选价格/视觉标杆的房型、可订状态、同条件报价和公开图片；图片回执附采集时间、MIME 与 SHA-256，可直接进入独立 HTML 与飞书附件交付。
+- 新增 `market_evidence_runtime.py` 与 `collect_market_evidence.py --preflight --all-engines`。Hermes 或新 Mac Mini 可在不打开页面、不读取 Cookie 的前提下检查 Playwright、Ego Lite、Kimi WebBridge 及外部适配器；缺少 Kimi 扩展/守护进程/JSON 适配器会输出明确的安装配置动作。
+- 页面市场证据契约新增全量 `candidates` 与有限 `benchmark_set` 两层：地图 Profile 覆盖完整 2km 候选，报价与视觉 Profile 只覆盖显式选定、已绑定 OTA 稳定房源 ID 的标杆，避免把泛候选的缺图误判为完整采集失败。
+- 飞书竞品与证据表新增 OTA 平台/酒店 ID/房型 ID、可订状态、税费口径、取消政策以及图片 MIME/SHA-256 字段，交付可回溯到同一次页面观察。
+
+### Guardrails
+
+- Ctrip Profile 以 `property_id` 构造包含 `checkIn`、`checkOut`、成人数的报价页，并从渲染内容复核统一报价条件。页面未登录、验证码、售罄、日期/人数不一致或税费/取消政策缺失时保持 `partial`，不把任何价格计入 ADR。
+- ADR 样本现在逐条校验房型来源 ID、可订状态、币种、含税标记、取消政策、同一 `pricing_context`、来源 URL 和采集时间；不完整报价仅作为不可聚合的观察。
+- Ego Lite 仅为装有它的 macOS 主机提供认证浏览器运行时。Linux/云端 Hermes 必须使用明确配置的 Playwright 或其他采集器，不能伪装成已登录 Ego 会话。
+
+### Validation
+
+- 新增 OTA 身份桥接、严格报价资格、Mac Mini/Kimi/Ego 预检与不存在隐式回退的回归；实测受控 Ctrip 页面可取得房型和嵌入式视觉证据，而未登录报价正确返回 `partial`。
+- 完成“成都市望平街笨酒店、17 间联营轻改”脱敏端到端验收：Playwright 360 地图取得确认中心点与完整 2km 候选池；Ego Lite 携程 Profile 消费同一候选池并取得真实页面图片、来源回执与哈希；`run.py`、离线 HTML 与飞书 manifest 均保留 `pre_evaluation_only` 和可见待补项。完整复现与验收边界见 `docs/END_TO_END_ACCEPTANCE.md`。
+
+## 0.11.0 - 2026-08-13
+
+### Added
+
+- 新增正式页面市场证据契约 `market-evidence-collection/v1` 与无界面 CLI/本机 HTTP 工具 `collect_market_evidence.py`。所有 Agent 平台均可先采集、取得 `skill-patch`，再调用唯一的确定性测算入口。
+- 新增默认 `360-map-v1` Playwright Profile 和锁定的 Node 运行时：采集同源点位、2km候选、公开房型名称、公开房图、页面 URL/HTTP 回执和四项覆盖度。Kimi WebBridge、crawl4ai、xcrawl、OpenCLI 通过同一 JSON-stdin/stdout 业务契约成为可替换的正式页面采集引擎。
+
+### Guardrails
+
+- 页面采集不再是模型或 Codex Computer Use 的隐式能力。引擎、Profile、版本、采集时间和页面来源回执必须可追溯；未配置引擎不能静默回退。
+- 地图列表价不会伪装成同条件房态价格。当前 360 Profile 对 `pricing` 明确返回 `not_collected`，使下游保持 `partial/pre_evaluation_only`，直至有能够按统一入住条件抓取可订状态与房价的页面 Profile。
+
+### Validation
+
+- 新增页面契约、2km上限、完整性、防回退和 Playwright 调用边界的离线回归；发布归档白名单纳入采集工具、Profile、锁定依赖和契约说明。
+
+## 0.10.1 - 2026-08-13
+
+### Fixed
+
+- 修复飞书多维表格在房型、2km竞品或竞品图片证据缺失时出现静默空表的问题。Manifest `1.1` 会在相应子表写入明确的待补记录，不伪造房型、竞品、报价或图片事实。
+- 项目测算总表新增 `交付完整性`、`交付待补项`；三张专题表新增 `交付状态`。顶层 `delivery_gate` 仅在房型、2km竞品和正式竞品视觉图片均已满足时标记 `final_delivery_eligible: true`；即使满足，宿主也须在附件读回前保持“待写入核验”。
+
+### Guardrails
+
+- 已授权宿主只可在 `delivery_gate.final_delivery_eligible` 为真时将运行标记为完整客户交付；其他结果可保留为带可见缺口的草稿，不能包装为完成。
+
+### Validation
+
+- 新增回归：缺房型、缺2km竞品、缺视觉图片分别生成可见待补行；完整交付必须通过专项门槛。
+
 ## 0.10.0 - 2026-08-13
 
 ### Added

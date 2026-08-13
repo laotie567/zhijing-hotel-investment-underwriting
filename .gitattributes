@@ -7,7 +7,8 @@
 
 # Repository-only documentation never belongs in a release archive, even if a
 # packager archives the repository root by mistake. The production Skill has
-# no Git LFS, binary, or third-party runtime dependency.
+# no Git LFS or binary asset; its optional page collector declares its Node
+# runtime dependency in the package-local lockfile.
 docs export-ignore
 docs/** export-ignore
 .env.example export-ignore

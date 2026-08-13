@@ -16,6 +16,7 @@ _SOURCE_FIELDS = ("source_platform", "source_url", "observed_at", "confidence")
 _CONFIDENCE_LEVELS = {"low", "medium", "high"}
 _ADR_ELIGIBLE_CONFIDENCE_LEVELS = {"medium", "high"}
 _PRICING_CURRENCY = "CNY"
+_OFFER_AVAILABILITY = {"available", "sold_out", "unknown"}
 
 
 class CompetitorInputError(ValueError):
@@ -223,6 +224,12 @@ def _candidate_result(candidate: Any, center: Mapping[str, Any]) -> dict[str, An
         "pending_fields": pending,
         "source": source,
         "room_offers": candidate.get("room_offers") if isinstance(candidate.get("room_offers"), list) else [],
+        "benchmark_selected": candidate.get("benchmark_selected") is True,
+        "booking_evidence": (
+            candidate.get("booking_evidence")
+            if isinstance(candidate.get("booking_evidence"), list)
+            else []
+        ),
     }
     if not {"coordinate_system", "longitude", "latitude"}.intersection(pending):
         distance = _haversine_meters(
@@ -260,20 +267,45 @@ def _candidate_result(candidate: Any, center: Mapping[str, Any]) -> dict[str, An
     return result
 
 
-def _valid_offer(value: Any) -> tuple[int, float] | None:
+def _offer_workstations(value: Any) -> int | None:
     if not isinstance(value, Mapping):
         return None
     workstations = value.get("workstations")
+    if not isinstance(workstations, int) or isinstance(workstations, bool) or workstations <= 0:
+        return None
+    return workstations
+
+
+def _valid_offer(value: Any, context: Mapping[str, Any] | None) -> tuple[int, float] | None:
+    """Return one ADR-eligible OTA offer, never an unscoped listing price."""
+
+    if not isinstance(value, Mapping):
+        return None
+    workstations = _offer_workstations(value)
     price = value.get("nightly_price")
     if (
-        not isinstance(workstations, int)
-        or isinstance(workstations, bool)
-        or workstations <= 0
+        workstations is None
         or not isinstance(price, (int, float))
         or isinstance(price, bool)
         or not math.isfinite(float(price))
         or float(price) <= 0
     ):
+        return None
+    if context is None:
+        return None
+    required_text = ("room_type", "room_type_provider_id", "cancellation_policy")
+    if any(not isinstance(value.get(field), str) or not value[field].strip() for field in required_text):
+        return None
+    if value.get("availability") not in _OFFER_AVAILABILITY or value.get("availability") != "available":
+        return None
+    if value.get("currency") != _PRICING_CURRENCY or not isinstance(value.get("tax_included"), bool):
+        return None
+    if not _valid_url(value.get("source_url")) or not _valid_observed_at(value.get("observed_at")):
+        return None
+    raw_context = value.get("pricing_context")
+    if not isinstance(raw_context, Mapping):
+        return None
+    if any(raw_context.get(field) != context.get(field) for field in ("check_in_date", "nights", "guests", "currency")):
         return None
     return workstations, float(price)
 
@@ -285,7 +317,7 @@ def _round_to_ten(value: float) -> float:
 def _pricing_summary(
     competitors: list[dict[str, Any]],
     collection_complete: bool,
-    pricing_context_complete: bool,
+    pricing_context: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
     prices_by_workstations: dict[int, list[float]] = {}
     observed_workstations: set[int] = set()
@@ -293,7 +325,10 @@ def _pricing_summary(
     for competitor in competitors:
         property_prices: dict[int, list[float]] = {}
         for offer in competitor["room_offers"]:
-            normalized = _valid_offer(offer)
+            workstations = _offer_workstations(offer)
+            if workstations is not None:
+                observed_workstations.add(workstations)
+            normalized = _valid_offer(offer, pricing_context)
             if normalized is None:
                 continue
             workstations, price = normalized
@@ -302,7 +337,6 @@ def _pricing_summary(
             # A property can publish multiple room offers. Collapse them to one
             # representative value so the minimum sample count means independent
             # competitor properties rather than duplicated offers.
-            observed_workstations.add(workstations)
             confidence = competitor["source"].get("confidence", "").lower()
             if confidence in _ADR_ELIGIBLE_CONFIDENCE_LEVELS:
                 prices_by_workstations.setdefault(workstations, []).append(float(median(prices)))
@@ -317,7 +351,7 @@ def _pricing_summary(
         status = "available"
         if not collection_complete:
             status = "collection_incomplete"
-        elif not pricing_context_complete:
+        elif pricing_context is None:
             status = "pricing_context_missing"
         elif len(prices) < MINIMUM_PRICING_SAMPLES:
             status = (
@@ -453,7 +487,7 @@ def analyze_competitors(request: Mapping[str, Any]) -> dict[str, Any]:
     pricing = _pricing_summary(
         competitors,
         collection_complete,
-        pricing_context is not None,
+        pricing_context,
     )
 
     return {

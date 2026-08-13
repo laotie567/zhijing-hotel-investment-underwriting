@@ -2,10 +2,14 @@
 
 ## 请求
 
-唯一公开请求是 `hotel-investment-underwriting/schemas/skill-request.schema.json`。
+公开契约分为两段：先由 `market-evidence-collection/v1` 采集页面证据，再把它
+的 `skill-patch` 合并进唯一的测算请求
+`hotel-investment-underwriting/schemas/skill-request.schema.json`。
 
 | 区块 | 用途 | 权威来源 |
 |---|---|---|
+| 页面采集请求 | 地址、2km范围、房态报价口径与必需证据维度 | 宿主 Agent / 用户确认 |
+| 页面采集回执 | 引擎、Profile、页面 URL/HTTP 状态、采集时间、全量候选/标杆集/房型/图片/报价覆盖度 | Playwright、Ego Lite、Kimi WebBridge、crawl4ai、xcrawl 或 OpenCLI 的显式 Profile |
 | `project_input` | 合同、房型、收入、成本和财务假设 | 项目团队、合同、报价、经确认的经营资料 |
 | `competitor_analysis.confirmed_location` | 2km 分析中心 | 已授权地图能力 |
 | `competitor_analysis.candidates` | 电竞竞品候选与报价观察 | 已授权地图/证据采集或人工核验 |
@@ -16,6 +20,22 @@
 
 金额单位为人民币元；比例使用小数；ADR 为元/已售房夜；距离由 Skill 计算为米。
 
+## 页面采集业务契约
+
+`schemas/market-evidence-collection.schema.json` 与
+`scripts/market_evidence_contract.py` 是页面采集的权威输入校验。输出必须包含：
+
+- `collector.engine`（仅 `playwright`、`ego-browser`、`kimi-webbridge`、`crawl4ai`、`xcrawl` 或 `opencli`）、引擎版本、Profile、开始/结束时间和实际页面/图片 URL 的 HTTP 回执；
+- 已确认的 `target_resolution`，或明确的歧义/失败；不能以名称相近自动替换物业；
+- `candidates`、`benchmark_set`、`room_types`、`images`、`pricing` 五项独立覆盖度；
+- 可合并的 `market_evidence`、`competitor_analysis` 和 `competitor_report`。采集器没有 `project_input`，也不能计算投资结论；`run.py` 会拒绝与回执不一致的两块竞品证据。
+
+`status=complete` 只有在五项覆盖度全部 `complete` 时才合法。地图 Profile 必须完成
+全量 2km 候选；价格/视觉 Profile 只对明确的 `benchmark_set` 负责。所有必需维度完成前，
+采集器必须输出 `status=partial` 和明确 `collection_gaps`，并把下游
+`competitor_analysis.collection_status` 保持为 `partial`。页面结构改变、登录失效、
+验证码、限流或来源错误同样是可见失败，不能由模型编造填补。
+
 ## 最小竞品事实
 
 每个候选需要：
@@ -23,7 +43,8 @@
 - 与 `confirmed_location.provider` 完全一致的 `provider`、`provider_place_id`、`coordinate_system: "GCJ-02"`、GCJ-02 `longitude`/`latitude`；
 - 对住宿候选提供 `property_kind`、`esports_positioning`、`operating_status`；已确认非住宿场所只需 `property_kind: "non_lodging"`，无需虚构酒店经营或电竞定位；
 - `source_platform`、`source_url`、`observed_at`、`confidence`；
-- 如需 ADR 参考，附带 `room_offers[].workstations` 和 `nightly_price`，并在请求顶层提供一个 `pricing_context`：`check_in_date`（`YYYY-MM-DD`）、正整数 `nights`、正整数 `guests` 和 `currency: "CNY"`。同一物业的多个同机位报价归并为该物业的中位数，不可充当多个样本。
+- 进入价格/视觉标杆前，`candidate_inventory[]` 中必须有该候选完整地图实体和显式 `ota_property`（平台、稳定 OTA 房源 ID、页面 URL、匹配方式和匹配时间）；不得根据名称自动合并地图与 OTA 酒店；
+- 如需 ADR 参考，`room_offers` 同时必须含 `room_type_provider_id`、`workstations`、`nightly_price`、`availability: "available"`、`currency: "CNY"`、`tax_included`、`cancellation_policy`、逐条 `pricing_context`、`source_url` 和带时区 `observed_at`。页面 Profile 必须以完全相同的入住条件取得可订状态和报价；地图/列表展示价、不同日期价或未说明房态的金额只能保留为原始观察，不能写入 ADR 样本。同一物业的多个同机位报价归并为该物业的中位数，不可充当多个样本。
 
 Skill 使用未舍入 Haversine 距离判断 `0 <= distance_meters <= 2000`。只有主营电竞住宿、营业中且证据完整的候选可成为 `pure_esports_hotel`；普通酒店附带电竞房标为 `incidental_esports_rooms`，已知非住宿/停业对象分别标为 `excluded_non_lodging` / `excluded_not_operating`，并都不进入正式竞品。
 
@@ -32,7 +53,7 @@ Skill 使用未舍入 Haversine 距离判断 `0 <= distance_meters <= 2000`。�
 ## 可选视觉展示证据
 
 `competitor_report.candidate_media[]` 必须通过已被结果确认的正式
-`pure_esports_hotel` 的 `provider_place_id` 绑定。每条可包含一段有 `observation_source_url` 的装修观察，以及最多 4 张带 `caption` 和 `source_url` 的 JPEG、PNG 或 WebP 图片。图片必须使用 `data:image/...;base64,...`；HTML 渲染器拒绝远程图片地址、SVG、未知字段和不匹配的图片字节。报告会在“视觉竞品对标”区把每条视觉证据与该竞品的距离、房型、机位和同条件报价集中呈现。这样 HTML 本身没有外部图片、脚本或样式依赖，来源 URL 只作为可点击的追溯记录。
+`pure_esports_hotel` 的 `provider_place_id` 绑定。每条可包含一段有 `observation_source_url` 的装修观察，以及最多 4 张带 `caption`、`source_url`、采集时间、MIME 和 SHA-256 的 JPEG、PNG 或 WebP 图片。图片必须使用 `data:image/...;base64,...`；HTML 渲染器拒绝远程图片地址、SVG、未知字段、错误 hash 和不匹配的图片字节。报告会在“视觉竞品对标”区把每条视觉证据与该竞品的距离、房型、机位和同条件报价集中呈现。这样 HTML 本身没有外部图片、脚本或样式依赖，来源 URL 只作为可点击的追溯记录。
 
 展示证据只辅助人工比较装修与产品状态，不进入正式竞品分类、ADR 样本或财务模型，也不自动写入调价结论。若 `provider_place_id` 不在本次正式竞品集合内，HTML 或 Bitable 输出快速失败，避免生成孤立、错绑或未展示的图片；JSON 和 Feishu 摘要的核心投测仍可独立运行。
 
@@ -56,4 +77,4 @@ Skill 使用未舍入 Haversine 距离判断 `0 <= distance_meters <= 2000`。�
 
 ## 不属于该契约的内容
 
-项目修订号、审批事件、运行归档、爬虫请求/响应、供应商密钥、任务授权和施工状态不是 Skill 输入或输出。它们不在当前仓库或发布包中；如有需要，由宿主单独管理。
+项目修订号、审批事件、运行归档、原始页面正文/完整响应、供应商密钥、任务授权和施工状态不是测算 Skill 输入或输出。页面采集的最小回执与规范化证据属于发布包契约；原始抓取内容和凭证仍由宿主单独管理。

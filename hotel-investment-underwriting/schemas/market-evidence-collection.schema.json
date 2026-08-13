@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Page-collected market evidence request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "target", "search", "pricing_context"],
+  "properties": {
+    "contract_version": {"const": "market-evidence-collection/v1"},
+    "request_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "address", "city_id"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+        "address": {"type": "string", "minLength": 1, "maxLength": 500},
+        "city_id": {"type": "string", "minLength": 1, "maxLength": 40},
+        "center": {"$ref": "skill-request.schema.json#/properties/competitor_analysis/properties/confirmed_location"}
+      }
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_profile", "query", "radius_meters"],
+      "properties": {
+        "provider_profile": {"enum": ["360-map-v1", "ctrip-hotel-v1"]},
+        "query": {"type": "string", "minLength": 1, "maxLength": 100},
+        "radius_meters": {"type": "integer", "minimum": 1, "maximum": 2000},
+        "max_candidates": {"type": "integer", "minimum": 1, "maximum": 200},
+        "max_benchmark_candidates": {"type": "integer", "minimum": 0, "maximum": 30},
+        "max_images_per_candidate": {"type": "integer", "minimum": 0, "maximum": 4}
+      }
+    },
+    "candidate_inventory": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidate", "benchmark_selected"],
+        "properties": {
+          "candidate": {"type": "object"},
+          "benchmark_selected": {"type": "boolean"},
+          "ota_property": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["platform", "property_id", "property_url", "match_method", "matched_at"],
+            "properties": {
+              "platform": {"const": "携程"},
+              "property_id": {"type": "string", "minLength": 1, "maxLength": 200},
+              "property_url": {"type": "string", "format": "uri"},
+              "match_method": {"type": "string", "minLength": 1, "maxLength": 100},
+              "matched_at": {"type": "string", "format": "date-time"}
+            }
+          }
+        }
+      }
+    },
+    "pricing_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_in_date", "nights", "guests", "currency"],
+      "properties": {
+        "check_in_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        "nights": {"type": "integer", "minimum": 1, "maximum": 30},
+        "guests": {"type": "integer", "minimum": 1, "maximum": 12},
+        "currency": {"const": "CNY"}
+      }
+    },
+    "required_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "room_types": {"type": "boolean"},
+        "images": {"type": "boolean"},
+        "pricing": {"type": "boolean"},
+        "benchmark_set": {"type": "boolean"}
+      }
+    }
+  }
+}

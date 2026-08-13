@@ -46,8 +46,21 @@ def candidate(
         "room_offers": [
             {
                 "room_type": "双人电竞房",
+                "room_type_provider_id": f"{place_id}:room-2",
                 "workstations": 2,
                 "nightly_price": price,
+                "availability": "available",
+                "currency": "CNY",
+                "tax_included": True,
+                "cancellation_policy": "免费取消",
+                "pricing_context": {
+                    "check_in_date": "2026-08-26",
+                    "nights": 1,
+                    "guests": 2,
+                    "currency": "CNY",
+                },
+                "source_url": "https://m.ctrip.com/html5/hotel/hoteldetail/example.html",
+                "observed_at": "2026-08-12T09:10:00+08:00",
             }
             for price in (prices or [])
         ],
@@ -176,6 +189,24 @@ class CompetitorAnalysisTests(unittest.TestCase):
         self.assertIsNone(pricing["minimum_adr"])
         self.assertIsNone(pricing["median_adr"])
         self.assertIsNone(pricing["maximum_adr"])
+        self.assertIsNone(pricing["recommended_adr"])
+
+    def test_an_ota_price_without_the_exact_context_or_available_status_is_not_an_adr_sample(self) -> None:
+        request = complete_input(
+            [
+                candidate("P-1", 104.001, prices=[240]),
+                candidate("P-2", 104.002, prices=[260]),
+                candidate("P-3", 104.003, prices=[280]),
+            ]
+        )
+        request["candidates"][0]["room_offers"][0]["pricing_context"]["guests"] = 1
+        request["candidates"][1]["room_offers"][0]["availability"] = "sold_out"
+
+        result = competitor_analysis.analyze_competitors(request)
+
+        pricing = result["pricing_by_workstations"][0]
+        self.assertEqual("insufficient_samples", pricing["status"])
+        self.assertEqual(1, pricing["sample_count"])
         self.assertIsNone(pricing["recommended_adr"])
 
     def test_low_confidence_sources_remain_visible_but_do_not_count_toward_adr(self) -> None:

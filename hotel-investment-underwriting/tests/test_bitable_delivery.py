@@ -47,8 +47,21 @@ def complete_competitor_input() -> dict:
                 "room_offers": [
                     {
                         "room_type": "双人电竞房",
+                        "room_type_provider_id": f"P-{index}:room-2",
                         "workstations": 2,
                         "nightly_price": price,
+                        "availability": "available",
+                        "currency": "CNY",
+                        "tax_included": True,
+                        "cancellation_policy": "免费取消",
+                        "pricing_context": {
+                            "check_in_date": "2026-08-26",
+                            "nights": 1,
+                            "guests": 2,
+                            "currency": "CNY",
+                        },
+                        "source_url": "https://m.ctrip.com/html5/hotel/hoteldetail/example.html",
+                        "observed_at": "2026-08-12T09:10:00+08:00",
                     }
                 ],
                 "market_profile": {
@@ -85,24 +98,24 @@ def complete_competitor_input() -> dict:
 
 
 def competitor_report_input() -> dict:
+    image = {
+        "caption": "双人电竞房公开图",
+        "data_uri": (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+            "AAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9XQAAAABJRU5ErkJggg=="
+        ),
+        "source_url": "https://www.example.com/image",
+    }
     return {
         "candidate_media": [
             {
-                "provider_place_id": "P-1",
+                "provider_place_id": f"P-{index}",
                 "renovation_observation": "公开房图显示暖色木饰面与双机位桌面。",
                 "observation_source_url": "https://www.example.com/observation",
-                "images": [
-                    {
-                        "caption": "双人电竞房公开图",
-                        "data_uri": (
-                            "data:image/png;base64,"
-                            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
-                            "AAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9XQAAAABJRU5ErkJggg=="
-                        ),
-                        "source_url": "https://www.example.com/image",
-                    }
-                ],
+                "images": [image],
             }
+            for index in range(1, 4)
         ]
     }
 
@@ -133,8 +146,14 @@ class BitableDeliveryTests(unittest.TestCase):
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)
 
-        self.assertEqual("1.0", manifest["manifest_version"])
+        self.assertEqual("1.1", manifest["manifest_version"])
         self.assertEqual("skill_is_calculation_owner", manifest["write_policy"]["calculation_owner"])
+        self.assertTrue(manifest["delivery_gate"]["final_delivery_eligible"])
+        self.assertEqual(
+            "待写入核验",
+            manifest["records"]["项目测算总表"][0]["交付完整性"],
+        )
+        self.assertEqual(3, manifest["delivery_gate"]["expected_visual_attachment_count"])
         self.assertEqual(
             {
                 "项目测算总表",
@@ -204,7 +223,7 @@ class BitableDeliveryTests(unittest.TestCase):
         self.assertEqual("金冠", competitor["美团等级/冠"])
         self.assertEqual(22, competitor["房间数"])
         self.assertEqual(4.8, competitor["平台评分"])
-        self.assertEqual(1, len(manifest["attachments"]))
+        self.assertEqual(3, len(manifest["attachments"]))
         self.assertEqual("竞品报价与视觉证据", manifest["attachments"][0]["table"])
         self.assertIn("data:image/png;base64,", manifest["attachments"][0]["data_uri"])
         self.assertEqual("P-1-room-1.png", manifest["attachments"][0]["filename"])
@@ -250,7 +269,58 @@ class BitableDeliveryTests(unittest.TestCase):
 
         self.assertEqual("pre_evaluation_only", summary["结论范围"])
         self.assertEqual("needs_location_confirmation", summary["2km竞品状态"])
-        self.assertEqual([], manifest["records"]["2km竞品"])
+        self.assertEqual("待补证据", summary["交付完整性"])
+        self.assertIn("2km竞品", summary["交付待补项"])
+        self.assertEqual("已提供", manifest["records"]["房型配置"][0]["交付状态"])
+        self.assertEqual("待补2km竞品", manifest["records"]["2km竞品"][0]["交付状态"])
+        self.assertEqual("待补视觉图片", manifest["records"]["竞品报价与视觉证据"][0]["交付状态"])
+        self.assertFalse(manifest["delivery_gate"]["final_delivery_eligible"])
+
+    def test_delivery_manifest_writes_a_visible_room_type_gap_when_room_mix_is_missing(self) -> None:
+        request = self._request()
+        del request["project_input"]["revenue"]["room_types"]
+        result = run.run(request, defaults=self.defaults)
+
+        manifest = bitable_delivery.build_manifest(result, request, self.defaults)
+
+        room_gap = manifest["records"]["房型配置"]
+        self.assertEqual(1, len(room_gap))
+        self.assertEqual("待补房型", room_gap[0]["交付状态"])
+        self.assertIn("非房型数据", room_gap[0]["房型名称"])
+        self.assertIn("房型配置", manifest["delivery_gate"]["blocking_items"])
+
+    def test_delivery_gate_marks_each_formal_competitor_without_an_image_as_pending(self) -> None:
+        request = self._request()
+        request["competitor_report"] = {"candidate_media": []}
+        result = run.run(request, defaults=self.defaults)
+
+        manifest = bitable_delivery.build_manifest(result, request, self.defaults)
+
+        pending = [
+            row
+            for row in manifest["records"]["竞品报价与视觉证据"]
+            if row["交付状态"] == "待补视觉图片"
+        ]
+        self.assertEqual(3, len(pending))
+        self.assertTrue(all(row["附件状态"] == "无附件" for row in pending))
+        self.assertEqual("待补证据", manifest["delivery_gate"]["status"])
+        self.assertFalse(manifest["delivery_gate"]["final_delivery_eligible"])
+
+    def test_partial_competitor_collection_writes_a_visible_collection_gap(self) -> None:
+        request = self._request()
+        request["competitor_analysis"]["collection_status"] = "partial"
+        result = run.run(request, defaults=self.defaults)
+
+        manifest = bitable_delivery.build_manifest(result, request, self.defaults)
+
+        gaps = [
+            row
+            for row in manifest["records"]["2km竞品"]
+            if row["交付状态"] == "待补2km竞品"
+        ]
+        self.assertEqual(1, len(gaps))
+        self.assertEqual("待补证据", manifest["delivery_gate"]["status"])
+        self.assertIn("2km竞品", manifest["delivery_gate"]["blocking_items"])
 
     def test_bitable_rejects_malformed_delivery_only_market_profile(self) -> None:
         request = self._request()

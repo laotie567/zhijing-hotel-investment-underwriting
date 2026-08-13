@@ -8,6 +8,10 @@
     "project_input": {
       "$ref": "project-input.schema.json"
     },
+    "market_evidence": {
+      "type": "object",
+      "description": "Validated market-evidence-collection/v1 receipt. The public runner verifies it and requires competitor fields to match its embedded patch exactly."
+    },
     "competitor_analysis": {
       "type": "object",
       "properties": {
@@ -66,8 +70,31 @@
                   "type": "object",
                   "properties": {
                     "room_type": {"type": "string"},
+                    "room_type_provider_id": {"type": "string"},
                     "workstations": {"type": "integer", "minimum": 1},
-                    "nightly_price": {"type": "number", "exclusiveMinimum": 0}
+                    "nightly_price": {"type": "number", "exclusiveMinimum": 0},
+                    "availability": {"enum": ["available", "sold_out", "unknown"]},
+                    "currency": {"const": "CNY"},
+                    "tax_included": {"type": "boolean"},
+                    "cancellation_policy": {"type": "string"},
+                    "pricing_context": {"$ref": "#/properties/competitor_analysis/properties/pricing_context"},
+                    "source_url": {"type": "string", "format": "uri"},
+                    "observed_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              },
+              "benchmark_selected": {"type": "boolean"},
+              "booking_evidence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "platform": {"type": "string"},
+                    "property_id": {"type": "string"},
+                    "property_url": {"type": "string", "format": "uri"},
+                    "match_method": {"type": "string"},
+                    "matched_at": {"type": "string", "format": "date-time"},
+                    "observed_at": {"type": "string", "format": "date-time"}
                   }
                 }
               },
@@ -122,6 +149,10 @@
                       "pattern": "^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$"
                     },
                     "source_url": {"type": "string", "format": "uri", "pattern": "^https?://"}
+                    ,"observed_at": {"type": "string", "format": "date-time"}
+                    ,"mime_type": {"enum": ["image/jpeg", "image/png", "image/webp"]}
+                    ,"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                    ,"room_type_provider_id": {"type": "string", "maxLength": 240}
                   }
                 }
               }

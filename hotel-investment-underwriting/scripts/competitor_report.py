@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime
+import hashlib
 from html import escape
 import re
 from typing import Any, Mapping
@@ -12,6 +14,7 @@ from urllib.parse import urlparse
 _IMAGE_DATA_URI = re.compile(
     r"^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$"
 )
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_IMAGES_PER_CANDIDATE = 4
 _MAX_IMAGE_DATA_URI_LENGTH = 2_800_000
 _MAX_TOTAL_IMAGE_DATA_URI_LENGTH = 8_000_000
@@ -30,6 +33,16 @@ def _valid_http_url(value: Any) -> bool:
     except ValueError:
         return False
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _valid_observed_at(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 
 
 def _valid_image_bytes(media_type: str, payload: str) -> bool:
@@ -55,10 +68,25 @@ def _optional_text(value: Any, path: str, maximum: int) -> str | None:
     return normalized
 
 
+def _required_text(value: Any, path: str, maximum: int) -> str:
+    result = _optional_text(value, path, maximum)
+    if result is None:
+        raise CompetitorReportError(f"{path} must be a non-empty string")
+    return result
+
+
 def _normalize_image(value: Any, path: str) -> dict[str, str]:
     if not isinstance(value, Mapping):
         raise CompetitorReportError(f"{path} must be an object")
-    unknown = set(value) - {"caption", "data_uri", "source_url"}
+    unknown = set(value) - {
+        "caption",
+        "data_uri",
+        "source_url",
+        "observed_at",
+        "mime_type",
+        "sha256",
+        "room_type_provider_id",
+    }
     if unknown:
         raise CompetitorReportError(f"{path} has unknown fields: {sorted(unknown)}")
     caption = _optional_text(value.get("caption"), f"{path}.caption", 240)
@@ -71,11 +99,36 @@ def _normalize_image(value: Any, path: str) -> dict[str, str]:
     source_url = value.get("source_url")
     if not _valid_http_url(source_url):
         raise CompetitorReportError(f"{path}.source_url must be an http(s) URL")
-    return {
+    normalized = {
         "caption": caption or "竞品公开图片",
         "data_uri": data_uri,
         "source_url": str(source_url).strip(),
     }
+    observed_at = value.get("observed_at")
+    if observed_at is not None:
+        if not _valid_observed_at(observed_at):
+            raise CompetitorReportError(f"{path}.observed_at must be an ISO-8601 datetime with timezone")
+        normalized["observed_at"] = str(observed_at).strip()
+    mime_type = value.get("mime_type")
+    if mime_type is not None:
+        if mime_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise CompetitorReportError(f"{path}.mime_type is invalid")
+        if not data_uri.startswith(f"data:{mime_type};"):
+            raise CompetitorReportError(f"{path}.mime_type must match data_uri")
+        normalized["mime_type"] = mime_type
+    sha256 = value.get("sha256")
+    if sha256 is not None:
+        if not isinstance(sha256, str) or _SHA256.fullmatch(sha256) is None:
+            raise CompetitorReportError(f"{path}.sha256 must be lowercase SHA-256")
+        if hashlib.sha256(base64.b64decode(match.group(2), validate=True)).hexdigest() != sha256:
+            raise CompetitorReportError(f"{path}.sha256 does not match data_uri")
+        normalized["sha256"] = sha256
+    room_type_provider_id = value.get("room_type_provider_id")
+    if room_type_provider_id is not None:
+        normalized["room_type_provider_id"] = _required_text(
+            room_type_provider_id, f"{path}.room_type_provider_id", 240
+        )
+    return normalized
 
 
 def validate_report_evidence(value: Any) -> dict[str, Any]:
@@ -319,7 +372,10 @@ def _visual_benchmark_card(candidate: Mapping[str, Any], media: Mapping[str, Any
     image_html = "".join(
         "<figure>"
         f'<img src="{_text(image["data_uri"])}" alt="{_text(image["caption"])}">'
-        f"<figcaption>{_text(image['caption'])} · {_url(image['source_url'])}</figcaption>"
+        f"<figcaption>{_text(image['caption'])} · {_url(image['source_url'])}"
+        f"{(' · ' + _text(image['observed_at'])) if image.get('observed_at') else ''}"
+        f"{(' · SHA-256 ' + _text(image['sha256'])[:12] + '…') if image.get('sha256') else ''}"
+        "</figcaption>"
         "</figure>"
         for image in images
     )

@@ -42,8 +42,21 @@ def competitor_input() -> dict:
                 "room_offers": [
                     {
                         "room_type": "双人电竞房",
+                        "room_type_provider_id": f"P-{index}:room-2",
                         "workstations": 2,
                         "nightly_price": price,
+                        "availability": "available",
+                        "currency": "CNY",
+                        "tax_included": True,
+                        "cancellation_policy": "免费取消",
+                        "pricing_context": {
+                            "check_in_date": "2026-08-26",
+                            "nights": 1,
+                            "guests": 2,
+                            "currency": "CNY",
+                        },
+                        "source_url": "https://m.ctrip.com/html5/hotel/hoteldetail/example.html",
+                        "observed_at": "2026-08-12T09:10:00+08:00",
                     }
                 ],
             }

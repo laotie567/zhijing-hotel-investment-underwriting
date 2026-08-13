@@ -16,8 +16,16 @@ import calculate
 import competitor_report
 
 
-MANIFEST_VERSION = "1.0"
+MANIFEST_VERSION = "1.1"
 BASE_NAME = "智竞酒店投资分析交付"
+_DELIVERY_COMPLETENESS = ("待写入核验", "可交付", "待补证据")
+_DELIVERY_RECORD_STATUSES = (
+    "已提供",
+    "待补房型",
+    "待补2km竞品",
+    "待补视觉图片",
+    "检索完成无正式竞品",
+)
 
 
 class BitableDeliveryError(ValueError):
@@ -79,6 +87,8 @@ def standard_template() -> dict[str, Any]:
                 _text("项目名称"),
                 _text("资料截至"),
                 _select("结论范围", ("ready_for_review", "pre_evaluation_only")),
+                _select("交付完整性", _DELIVERY_COMPLETENESS),
+                _text("交付待补项"),
                 _select("决策评级", ("建议合作", "条件性推进", "审慎推进", "不建议合作")),
                 _select("数据置信度", ("high", "medium", "low")),
                 _select("准入状态", ("pass", "conditional", "fail", "not_evaluated")),
@@ -238,6 +248,7 @@ def standard_template() -> dict[str, Any]:
             [
                 _text("房型记录ID"),
                 _link("关联项目运行", "项目测算总表"),
+                _select("交付状态", _DELIVERY_RECORD_STATUSES),
                 _text("房型名称"),
                 _number("房间数", precision=0),
                 _number("每间机位数", precision=2),
@@ -256,6 +267,7 @@ def standard_template() -> dict[str, Any]:
             [
                 _text("竞品记录ID"),
                 _link("关联项目运行", "项目测算总表"),
+                _select("交付状态", _DELIVERY_RECORD_STATUSES),
                 _text("竞品名称"),
                 _text("地图提供商"),
                 _text("提供商地点ID"),
@@ -272,6 +284,9 @@ def standard_template() -> dict[str, Any]:
                 _number("评论数", precision=0),
                 _text("周边说明"),
                 _number("房型报价数", precision=0),
+                _text("OTA平台"),
+                _text("OTA酒店ID"),
+                _text("OTA匹配方式"),
                 _text("调研来源平台"),
                 _text("来源URL", url=True),
                 _text("采集时间"),
@@ -287,18 +302,27 @@ def standard_template() -> dict[str, Any]:
                 _text("证据记录ID"),
                 _link("关联项目运行", "项目测算总表"),
                 _link("关联竞品", "2km竞品"),
+                _select("交付状态", _DELIVERY_RECORD_STATUSES),
                 _select("证据类型", ("报价", "视觉")),
                 _text("竞品记录ID"),
                 _text("竞品名称"),
+                _text("OTA平台"),
+                _text("OTA酒店ID"),
                 _text("房型"),
+                _text("房型来源ID"),
                 _number("机位数", precision=0),
                 _number("报价（元/晚）", currency=True),
+                _select("可订状态", ("available", "sold_out", "unknown")),
+                _text("税费口径"),
+                _text("取消政策"),
                 _text("入住日期"),
                 _number("晚数", precision=0),
                 _number("入住人数", precision=0),
                 _text("币种"),
                 _text("装修/图片观察"),
                 _text("图片说明"),
+                _text("图片MIME"),
+                _text("图片SHA-256"),
                 _text("来源URL", url=True),
                 _text("采集时间"),
                 _select("证据置信度", ("low", "medium", "high")),
@@ -494,7 +518,10 @@ def _run_id(result: Mapping[str, Any], project_name: str) -> str:
 
 
 def _main_record(
-    result: Mapping[str, Any], data: Mapping[str, Any], run_id: str
+    result: Mapping[str, Any],
+    data: Mapping[str, Any],
+    run_id: str,
+    delivery_gate: Mapping[str, Any],
 ) -> dict[str, Any]:
     financial = _required_mapping(result.get("financial_result"), "result.financial_result")
     base = _required_mapping(financial.get("base_case"), "financial_result.base_case")
@@ -520,8 +547,19 @@ def _main_record(
         {
             "项目运行ID": run_id,
             "项目名称": financial.get("project_name"),
-            "资料截至": _safe_text(_required_mapping(data.get("metadata", {}), "merged metadata").get("as_of")),
+            "资料截至": _safe_text(
+                _required_mapping(data.get("metadata", {}), "merged metadata").get("as_of")
+            ),
             "结论范围": result.get("conclusion_scope"),
+            "交付完整性": (
+                "待写入核验"
+                if delivery_gate.get("final_delivery_eligible")
+                else "待补证据"
+            ),
+            "交付待补项": (
+                "；".join(str(item) for item in delivery_gate.get("blocking_items", []))
+                or None
+            ),
             "决策评级": decision.get("rating"),
             "数据置信度": decision.get("data_confidence"),
             "准入状态": admission.get("status"),
@@ -704,6 +742,7 @@ def _room_type_records(data: Mapping[str, Any], run_id: str) -> list[dict[str, A
             _omit_none(
                 {
                     "房型记录ID": _record_key(run_id, "room_type", index),
+                    "交付状态": "已提供",
                     "房型名称": room_type.get("name"),
                     "房间数": room_type.get("rooms"),
                     "每间机位数": room_type.get("workstations_per_room"),
@@ -716,6 +755,14 @@ def _room_type_records(data: Mapping[str, Any], run_id: str) -> list[dict[str, A
                     "传统贡献毛利率": room_type.get("traditional_contribution_margin_rate"),
                 }
             )
+        )
+    if not records:
+        records.append(
+            {
+                "房型记录ID": _record_key(run_id, "room_type_gap"),
+                "交付状态": "待补房型",
+                "房型名称": "待补：未提供结构化房型配置（非房型数据）",
+            }
         )
     return records
 
@@ -790,10 +837,18 @@ def _competitor_records(
         record_id = _record_key(run_id, "competitor", place_id)
         record_keys[place_id] = record_id
         source = candidate.get("source") if isinstance(candidate.get("source"), Mapping) else {}
+        booking = (
+            candidate.get("booking_evidence", [])[0]
+            if isinstance(candidate.get("booking_evidence"), list)
+            and candidate.get("booking_evidence")
+            and isinstance(candidate.get("booking_evidence")[0], Mapping)
+            else {}
+        )
         records.append(
             _omit_none(
                 {
                     "竞品记录ID": record_id,
+                    "交付状态": "已提供",
                     "竞品名称": candidate.get("name") or place_id,
                     "地图提供商": candidate.get("provider"),
                     "提供商地点ID": place_id,
@@ -810,6 +865,9 @@ def _competitor_records(
                     "评论数": profile.get("review_count"),
                     "周边说明": profile.get("surroundings"),
                     "房型报价数": len(candidate.get("room_offers", [])),
+                    "OTA平台": booking.get("platform"),
+                    "OTA酒店ID": booking.get("property_id"),
+                    "OTA匹配方式": booking.get("match_method"),
                     "调研来源平台": source.get("source_platform"),
                     "来源URL": source.get("source_url"),
                     "采集时间": source.get("observed_at"),
@@ -819,11 +877,57 @@ def _competitor_records(
                 }
             )
         )
+    if not records:
+        missing = [str(item) for item in analysis.get("missing_inputs", [])]
+        collection_complete_without_candidates = analysis.get("status") == "complete"
+        records.append(
+            _omit_none(
+                {
+                    "竞品记录ID": _record_key(run_id, "competitor_collection_gap"),
+                    "交付状态": (
+                        "检索完成无正式竞品"
+                        if collection_complete_without_candidates
+                        else "待补2km竞品"
+                    ),
+                    "竞品名称": (
+                        "2km检索完成：无可写入的正式竞品"
+                        if collection_complete_without_candidates
+                        else "待补：2km竞品采集（非竞品记录）"
+                    ),
+                    "分类": (
+                        "collection_complete_zero_formal_competitor"
+                        if collection_complete_without_candidates
+                        else "delivery_gap"
+                    ),
+                    "正式竞品": False,
+                    "排除/提示原因": "；".join(missing) or None,
+                    "待补齐字段": "；".join(missing) or None,
+                }
+            )
+        )
+    elif analysis.get("status") != "complete":
+        missing = [str(item) for item in analysis.get("missing_inputs", [])]
+        records.append(
+            _omit_none(
+                {
+                    "竞品记录ID": _record_key(run_id, "competitor_collection_gap"),
+                    "交付状态": "待补2km竞品",
+                    "竞品名称": "待补：2km竞品集合尚未完成（非竞品记录）",
+                    "分类": "delivery_gap",
+                    "正式竞品": False,
+                    "排除/提示原因": "；".join(missing) or "collection_incomplete",
+                    "待补齐字段": "；".join(missing) or "collection_status=complete",
+                }
+            )
+        )
     return records, record_keys
 
 
 def _evidence_records(
-    result: Mapping[str, Any], request: Mapping[str, Any], run_id: str, competitor_keys: Mapping[str, str]
+    result: Mapping[str, Any],
+    request: Mapping[str, Any],
+    run_id: str,
+    competitor_keys: Mapping[str, str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     analysis = _required_mapping(result.get("competitor_analysis"), "result.competitor_analysis")
     formal = {
@@ -835,7 +939,18 @@ def _evidence_records(
     records: list[dict[str, Any]] = []
     attachments: list[dict[str, Any]] = []
     for place_id, candidate in formal.items():
-        source = candidate.get("source") if isinstance(candidate.get("source"), Mapping) else {}
+        source = (
+            candidate.get("source")
+            if isinstance(candidate.get("source"), Mapping)
+            else {}
+        )
+        booking = (
+            candidate.get("booking_evidence", [])[0]
+            if isinstance(candidate.get("booking_evidence"), list)
+            and candidate.get("booking_evidence")
+            and isinstance(candidate.get("booking_evidence")[0], Mapping)
+            else {}
+        )
         for index, offer in enumerate(candidate.get("room_offers", []), start=1):
             if not isinstance(offer, Mapping):
                 continue
@@ -844,18 +959,28 @@ def _evidence_records(
                 _omit_none(
                     {
                         "证据记录ID": evidence_id,
+                        "交付状态": "已提供",
                         "证据类型": "报价",
                         "竞品记录ID": competitor_keys.get(place_id),
                         "竞品名称": candidate.get("name") or place_id,
+                        "OTA平台": booking.get("platform"),
+                        "OTA酒店ID": booking.get("property_id"),
                         "房型": offer.get("room_type"),
+                        "房型来源ID": offer.get("room_type_provider_id"),
                         "机位数": offer.get("workstations"),
                         "报价（元/晚）": offer.get("nightly_price"),
-                        "入住日期": context.get("check_in_date"),
-                        "晚数": context.get("nights"),
-                        "入住人数": context.get("guests"),
-                        "币种": context.get("currency"),
-                        "来源URL": source.get("source_url"),
-                        "采集时间": source.get("observed_at"),
+                        "可订状态": offer.get("availability"),
+                        "税费口径": (
+                            "含税" if offer.get("tax_included") is True else
+                            ("不含税/另付税费" if offer.get("tax_included") is False else None)
+                        ),
+                        "取消政策": offer.get("cancellation_policy"),
+                        "入住日期": offer.get("pricing_context", context).get("check_in_date") if isinstance(offer.get("pricing_context", context), Mapping) else context.get("check_in_date"),
+                        "晚数": offer.get("pricing_context", context).get("nights") if isinstance(offer.get("pricing_context", context), Mapping) else context.get("nights"),
+                        "入住人数": offer.get("pricing_context", context).get("guests") if isinstance(offer.get("pricing_context", context), Mapping) else context.get("guests"),
+                        "币种": offer.get("currency") or context.get("currency"),
+                        "来源URL": offer.get("source_url") or source.get("source_url"),
+                        "采集时间": offer.get("observed_at") or source.get("observed_at"),
                         "证据置信度": source.get("confidence"),
                         "附件状态": "无附件",
                     }
@@ -870,9 +995,17 @@ def _evidence_records(
             "competitor_report references candidates absent from the formal competitor set: "
             f"{invalid}"
         )
+    image_evidence_place_ids: set[str] = set()
     for candidate_media in media["candidate_media"]:
         place_id = candidate_media["provider_place_id"]
         candidate = formal[place_id]
+        booking = (
+            candidate.get("booking_evidence", [])[0]
+            if isinstance(candidate.get("booking_evidence"), list)
+            and candidate.get("booking_evidence")
+            and isinstance(candidate.get("booking_evidence")[0], Mapping)
+            else {}
+        )
         observation = candidate_media.get("renovation_observation")
         observation_url = candidate_media.get("observation_source_url")
         if observation:
@@ -881,9 +1014,12 @@ def _evidence_records(
                 _omit_none(
                     {
                         "证据记录ID": observation_id,
+                        "交付状态": "已提供",
                         "证据类型": "视觉",
                         "竞品记录ID": competitor_keys.get(place_id),
                         "竞品名称": candidate.get("name") or place_id,
+                        "OTA平台": booking.get("platform"),
+                        "OTA酒店ID": booking.get("property_id"),
                         "装修/图片观察": observation,
                         "来源URL": observation_url,
                         "附件状态": "无附件",
@@ -891,16 +1027,24 @@ def _evidence_records(
                 )
             )
         for image_index, image in enumerate(candidate_media.get("images", []), start=1):
+            image_evidence_place_ids.add(place_id)
             evidence_id = _record_key(run_id, "visual_image", place_id, image_index)
             records.append(
                 _omit_none(
                     {
                         "证据记录ID": evidence_id,
+                        "交付状态": "已提供",
                         "证据类型": "视觉",
                         "竞品记录ID": competitor_keys.get(place_id),
                         "竞品名称": candidate.get("name") or place_id,
+                        "OTA平台": booking.get("platform"),
+                        "OTA酒店ID": booking.get("property_id"),
                         "图片说明": image.get("caption"),
+                        "房型来源ID": image.get("room_type_provider_id"),
+                        "图片MIME": image.get("mime_type"),
+                        "图片SHA-256": image.get("sha256"),
                         "来源URL": image.get("source_url"),
+                        "采集时间": image.get("observed_at"),
                         "附件状态": "待上传",
                     }
                 )
@@ -917,7 +1061,95 @@ def _evidence_records(
                     "status_after_upload": "已上传",
                 }
             )
+    if not formal:
+        analysis_complete = analysis.get("status") == "complete"
+        records.append(
+            {
+                "证据记录ID": _record_key(run_id, "visual_gap_no_formal_competitor"),
+                "交付状态": (
+                    "检索完成无正式竞品" if analysis_complete else "待补视觉图片"
+                ),
+                "证据类型": "视觉",
+                "竞品名称": (
+                    "无正式竞品，未生成图片证据"
+                    if analysis_complete
+                    else "待补：先完成2km竞品采集，再绑定图片证据"
+                ),
+                "装修/图片观察": (
+                    "2km检索已完成且无正式竞品；没有可绑定的竞品房图。"
+                    if analysis_complete
+                    else "当前没有可绑定的正式竞品；不得以未核验图片进行装修判断。"
+                ),
+                "附件状态": "无附件",
+            }
+        )
+    else:
+        for place_id, candidate in formal.items():
+            if place_id in image_evidence_place_ids:
+                continue
+            source = (
+                candidate.get("source")
+                if isinstance(candidate.get("source"), Mapping)
+                else {}
+            )
+            records.append(
+                _omit_none(
+                    {
+                        "证据记录ID": _record_key(run_id, "visual_gap", place_id),
+                        "交付状态": "待补视觉图片",
+                        "证据类型": "视觉",
+                        "竞品记录ID": competitor_keys.get(place_id),
+                        "竞品名称": candidate.get("name") or place_id,
+                        "装修/图片观察": "未提供可嵌入的公开房型图；不得据此作装修、设备或价格判断。",
+                        "来源URL": source.get("source_url"),
+                        "采集时间": source.get("observed_at"),
+                        "附件状态": "无附件",
+                    }
+                )
+            )
     return records, attachments
+
+
+def _delivery_gate(
+    records: Mapping[str, list[Mapping[str, Any]]], attachments: list[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Expose and preserve visible gaps instead of allowing empty topic tables."""
+
+    required = (
+        ("房型配置", "待补房型", "房型配置"),
+        ("2km竞品", "待补2km竞品", "2km竞品"),
+        ("竞品报价与视觉证据", "待补视觉图片", "竞品图片证据"),
+    )
+    table_status: dict[str, dict[str, Any]] = {}
+    blocking_items: list[str] = []
+    for table, pending_status, label in required:
+        rows = records.get(table, [])
+        states = [str(row.get("交付状态")) for row in rows if isinstance(row, Mapping)]
+        is_blocked = not rows or pending_status in states
+        if is_blocked:
+            blocking_items.append(label)
+        table_status[table] = {
+            "record_count": len(rows),
+            "status": "待补证据" if is_blocked else "可交付",
+            "record_statuses": sorted(set(states)),
+        }
+    final_eligible = not blocking_items
+    return {
+        "status": "可交付" if final_eligible else "待补证据",
+        "final_delivery_eligible": final_eligible,
+        "blocking_items": blocking_items,
+        "expected_visual_attachment_count": len(attachments),
+        "post_write_completion": {
+            "initial_summary_status": (
+                "待写入核验" if final_eligible else "待补证据"
+            ),
+            "success_summary_status": "可交付",
+            "required_readback": (
+                "all_manifest_record_keys_links_and_visual_attachments"
+            ),
+        },
+        "tables": table_status,
+    }
 
 
 def _links(records: Mapping[str, list[Mapping[str, Any]]], run_id: str) -> list[dict[str, Any]]:
@@ -969,6 +1201,30 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     template = _required_mapping(manifest.get("template"), "manifest.template")
     tables = template.get("tables")
     records = _required_mapping(manifest.get("records"), "manifest.records")
+    delivery_gate = _required_mapping(manifest.get("delivery_gate"), "manifest.delivery_gate")
+    if delivery_gate.get("status") not in _DELIVERY_COMPLETENESS:
+        raise BitableDeliveryError("manifest.delivery_gate.status is invalid")
+    if not isinstance(delivery_gate.get("final_delivery_eligible"), bool):
+        raise BitableDeliveryError("manifest.delivery_gate.final_delivery_eligible must be boolean")
+    blocking_items = delivery_gate.get("blocking_items")
+    if not isinstance(blocking_items, list) or not all(
+        isinstance(item, str) for item in blocking_items
+    ):
+        raise BitableDeliveryError("manifest.delivery_gate.blocking_items must be a string array")
+    if not isinstance(delivery_gate.get("expected_visual_attachment_count"), int) or delivery_gate[
+        "expected_visual_attachment_count"
+    ] < 0:
+        raise BitableDeliveryError("manifest.delivery_gate.expected_visual_attachment_count is invalid")
+    completion = _required_mapping(
+        delivery_gate.get("post_write_completion"),
+        "manifest.delivery_gate.post_write_completion",
+    )
+    if completion.get("initial_summary_status") not in _DELIVERY_COMPLETENESS:
+        raise BitableDeliveryError("manifest.delivery_gate.post_write_completion.initial_summary_status is invalid")
+    if completion.get("success_summary_status") != "可交付":
+        raise BitableDeliveryError("manifest.delivery_gate.post_write_completion.success_summary_status is invalid")
+    if delivery_gate["final_delivery_eligible"] != (delivery_gate["status"] == "可交付"):
+        raise BitableDeliveryError("manifest.delivery_gate eligibility/status mismatch")
     if not isinstance(tables, list) or not tables:
         raise BitableDeliveryError("manifest.template.tables must be a non-empty array")
     table_names = set()
@@ -1003,7 +1259,9 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
 
 
 def build_manifest(
-    result: Mapping[str, Any], request: Mapping[str, Any], defaults: Mapping[str, Any] | None = None
+    result: Mapping[str, Any],
+    request: Mapping[str, Any],
+    defaults: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Map one completed Skill run to a Feishu-agnostic Bitable write manifest."""
 
@@ -1017,13 +1275,20 @@ def build_manifest(
     run_id = _run_id(result, project_name.strip())
     competitor_rows, competitor_keys = _competitor_records(result, request, run_id)
     evidence_rows, attachments = _evidence_records(result, request, run_id, competitor_keys)
+    room_rows = _room_type_records(data, run_id)
+    delivery_rows: dict[str, list[dict[str, Any]]] = {
+        "房型配置": room_rows,
+        "2km竞品": competitor_rows,
+        "竞品报价与视觉证据": evidence_rows,
+    }
+    delivery_gate = _delivery_gate(delivery_rows, attachments)
     records: dict[str, list[dict[str, Any]]] = {
-        "项目测算总表": [_main_record(result, data, run_id)],
+        "项目测算总表": [_main_record(result, data, run_id, delivery_gate)],
         "输入参数与来源": _input_records(data, financial, run_id),
         "投资与成本明细": _cost_records(financial, run_id),
         "年度收入与现金流": _annual_records(financial, run_id),
         "情景与敏感性": _scenario_records(financial, run_id),
-        "房型配置": _room_type_records(data, run_id),
+        "房型配置": room_rows,
         "2km竞品": competitor_rows,
         "竞品报价与视觉证据": evidence_rows,
     }
@@ -1036,9 +1301,15 @@ def build_manifest(
             "input_fingerprint_policy": "same_input_sha256_is_idempotent; changed_input_creates_a_new_project_run",
             "attachment_policy": "upload_only_manifest_data_uri; never_fetch_remote_image_url",
             "link_policy": "create_records_first_then_resolve_logical_links",
+            "delivery_completion_policy": (
+                "write visible gap records; begin an eligible manifest as 待写入核验 and "
+                "change the summary to 可交付 only after the host readback verifies all "
+                "required records, links and attachments"
+            ),
         },
         "template": standard_template(),
         "project_run_id": run_id,
+        "delivery_gate": delivery_gate,
         "records": records,
         "links": _links(records, run_id),
         "attachments": attachments,

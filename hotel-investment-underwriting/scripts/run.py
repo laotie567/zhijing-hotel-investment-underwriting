@@ -14,11 +14,17 @@ import calculate
 import competitor_analysis
 import competitor_report
 import input_contract
+import market_evidence_contract
 
 
 _PACKAGE_VERSION_PATH = Path(__file__).resolve().parent.parent / "VERSION"
 SKILL_VERSION = f"hotel-investment-underwriting/{_PACKAGE_VERSION_PATH.read_text(encoding='utf-8').strip()}"
-_REQUEST_FIELDS = {"project_input", "competitor_analysis", "competitor_report"}
+_REQUEST_FIELDS = {
+    "project_input",
+    "market_evidence",
+    "competitor_analysis",
+    "competitor_report",
+}
 
 
 class SkillRunError(ValueError):
@@ -37,6 +43,34 @@ def _canonical_json(value: Any) -> bytes:
 
 def _sha256(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value)).hexdigest()
+
+
+def _normalize_request(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Bind page-collection receipt to the exact evidence consumed by the Skill."""
+
+    if not isinstance(request, Mapping):
+        raise SkillRunError("skill request must be an object")
+    unknown = set(request) - _REQUEST_FIELDS
+    if unknown:
+        raise SkillRunError(f"unknown skill request fields: {sorted(unknown)}")
+    normalized = dict(request)
+    raw_receipt = request.get("market_evidence")
+    if raw_receipt is None:
+        return normalized
+    try:
+        patch = market_evidence_contract.skill_request_patch(raw_receipt)
+    except market_evidence_contract.MarketEvidenceContractError as exc:
+        raise SkillRunError(f"invalid market_evidence receipt: {exc}") from exc
+    for field in ("competitor_analysis", "competitor_report"):
+        supplied = request.get(field)
+        collected = patch[field]
+        if supplied is not None and supplied != collected:
+            raise SkillRunError(
+                f"{field} must exactly match the attached market_evidence receipt"
+            )
+        normalized[field] = collected
+    normalized["market_evidence"] = patch["market_evidence"]
+    return normalized
 
 
 def _workflow(competitors: Mapping[str, Any]) -> dict[str, Any]:
@@ -126,11 +160,7 @@ def run(request: Mapping[str, Any], defaults: Mapping[str, Any] | None = None) -
     Skill never silently changes an investment conclusion from external evidence.
     """
 
-    if not isinstance(request, Mapping):
-        raise SkillRunError("skill request must be an object")
-    unknown = set(request) - _REQUEST_FIELDS
-    if unknown:
-        raise SkillRunError(f"unknown skill request fields: {sorted(unknown)}")
+    request = _normalize_request(request)
     project_input = request.get("project_input")
     if not isinstance(project_input, Mapping):
         raise SkillRunError("project_input must be an object")
@@ -193,7 +223,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        request = _load_json(args.input)
+        request = _normalize_request(_load_json(args.input))
         defaults = _load_json(args.defaults) if args.defaults else None
         result = run(request, defaults)
         rendered_html = (
@@ -214,6 +244,7 @@ def main() -> int:
         bitable_delivery.BitableDeliveryError,
         SkillRunError,
         input_contract.InputContractError,
+        market_evidence_contract.MarketEvidenceContractError,
         competitor_analysis.CompetitorInputError,
         competitor_report.CompetitorReportError,
         calculate.ModelError,

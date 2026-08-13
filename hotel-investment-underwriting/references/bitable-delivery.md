@@ -22,6 +22,35 @@ The Base uses values, text, select, attachment and record-link fields only.
 It deliberately has no formula or lookup field: `calculate.py` remains the
 only finance/calculation owner.
 
+## Empty-table prevention and delivery gate
+
+Manifest `1.1` never serializes the three decision-facing tabs as silent empty
+arrays. Each now has `交付状态`; the project summary also has `交付完整性` and
+`交付待补项`.
+
+- A missing room mix creates one `待补房型` notice. It is explicitly labelled
+  non-room data and carries no invented room count, ADR or OCC.
+- Missing or incomplete 2km research creates one `待补2km竞品` notice. A complete
+  search with zero formal competitors creates `检索完成无正式竞品`, which is a
+  valid result rather than a missing-data condition.
+- Every formal competitor without an embedded image creates one
+  `待补视觉图片` notice bound to that competitor. No formal competitors creates
+  one visible non-competitor visual notice instead of an empty evidence table.
+
+The manifest's top-level `delivery_gate` is the evidence readiness decision for
+these three tabs. The host must only present the run as a complete client
+delivery when `delivery_gate.final_delivery_eligible` is `true` **and** its
+post-write readback has changed the summary's `交付完整性` from `待写入核验` to
+`可交付`. This prevents a failed attachment upload from being misreported as a
+complete visual delivery. When the gate is false, the host may write the
+manifest as a draft for traceability, but must preserve the gap rows and
+`交付待补项`; it must not call the draft a completed research delivery.
+
+For a positive gate, use `delivery_gate.expected_visual_attachment_count` and
+`delivery_gate.post_write_completion` as deterministic host checks. The host
+must match every manifest record key and link, and read back that many visual
+attachment cells before setting the summary to `可交付`.
+
 It carries forward the useful field families from the historic Zhijing Excel
 workbooks without copying their sheet formulas: `竞品调研` becomes `2km竞品` plus
 `竞品报价与视觉证据`; `房型配置表` becomes `房型配置`; `运营分析` and `投资回报表`
@@ -51,6 +80,12 @@ financial input. Its exact validation rules are in
    `data_uri` to the named attachment field. Do not download `source_url` or
    treat it as an image payload; it is a traceability link only. After a
    successful upload, set `附件状态` to `status_after_upload`.
+5. Before writing, verify or migrate the `1.1` fields: summary
+   `交付完整性`/`交付待补项` and child-table `交付状态`. After writeback, read them
+   and attachment counts back. For an eligible manifest, only then update the
+   summary from `待写入核验` to `可交付`; otherwise keep or set `待补证据` and state
+   the failed/missing item. Do not mark the project complete when the manifest
+   delivery gate is blocked.
 
 The host must use the user or service identity explicitly authorised for that
 Base. The manifest has no Base token, user ID, credential, access policy or

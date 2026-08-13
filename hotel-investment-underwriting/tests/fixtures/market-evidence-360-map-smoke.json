@@ -1,0 +1,36 @@
+{
+  "contract_version": "market-evidence-collection/v1",
+  "request_id": "smoke-ben-hotel-360-map",
+  "target": {
+    "name": "笨酒店",
+    "address": "成都市成华区望平街滨河路6号",
+    "city_id": "510100",
+    "center": {
+      "provider": "360地图",
+      "provider_place_id": "2e73fbbc29a903d6",
+      "coordinate_system": "GCJ-02",
+      "longitude": 104.089545,
+      "latitude": 30.654181,
+      "status": "confirmed"
+    }
+  },
+  "search": {
+    "provider_profile": "360-map-v1",
+    "query": "电竞酒店",
+    "radius_meters": 2000,
+    "max_candidates": 200,
+    "max_benchmark_candidates": 1,
+    "max_images_per_candidate": 1
+  },
+  "pricing_context": {
+    "check_in_date": "2026-08-20",
+    "nights": 1,
+    "guests": 2,
+    "currency": "CNY"
+  },
+  "required_evidence": {
+    "room_types": true,
+    "images": true,
+    "pricing": true
+  }
+}

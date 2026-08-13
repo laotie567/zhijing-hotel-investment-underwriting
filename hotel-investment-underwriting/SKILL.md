@@ -1,40 +1,32 @@
 ---
 name: hotel-investment-underwriting
-description: Run mandatory 2km pure-esports competitor analysis and deterministic Chinese co-operated esports-hotel underwriting. Use for address screening, ADR evidence, CapEx/return/monthly payback, visual HTML, or Feishu Bitable delivery.
+description: Collect page-sourced 2km pure-esports competitor evidence and run deterministic Chinese co-operated esports-hotel underwriting. Use for address screening, competitor room/photos/availability-price evidence, ADR review, CapEx/return/monthly payback, visual HTML, or Feishu Bitable delivery.
 ---
 
 # Hotel Investment Underwriting
 
-One stateless Skill per hotel opportunity. Bundled code, not model prose, decides distance, classification, ADR and finance.
+One stateless Skill per opportunity. Code decides 2km distance, classification, ADR and finance.
 
-## Request
+## Required flow
 
-Call only `scripts/run.py` with `project_input`, `competitor_analysis`, and optional `competitor_report`. Financial input follows `schemas/project-input.schema.json`; the unified envelope, evidence, offers and media follow `schemas/skill-request.schema.json`.
+1. Call `collect_market_evidence.py` with `market-evidence-collection/v1`. It uses an explicit Playwright/Ego Lite/Kimi WebBridge/crawl4ai/xcrawl/OpenCLI Profile, returns a receipt and never needs Codex UI.
+2. Merge its `skill-patch` (including `market_evidence`) with `project_input`; call `run.py`. Any receipt mismatch is rejected.
+3. Keep `partial` until every required evidence dimension completes. Collect the full 2km population first; price/image checks apply only to the explicit benchmark set. Then review code-derived 2km results, explicitly select finance inputs and, if needed, generate Base manifest/HTML.
 
-Missing or incomplete `competitor_analysis` returns only `pre_evaluation_only`. `competitor_report` and optional candidate `market_profile` are delivery-only; neither changes classification, ADR or finance.
+## Rules
 
-## Fixed sequence
+- Formal competitors: same-provider, GCJ-02, operating primary-esports lodging within 2km with source. Never infer facts or widen range; incomplete evidence is `pre_evaluation_only`.
+- ADR requires complete collection, one `pricing_context`, three independent same-workstation `medium`/`high` properties; use median rounded to CNY 10. Never auto-write it into finance.
+- Finance is code-only. Visual evidence binds to a formal `provider_place_id` and is bounded JPEG/PNG/WebP `data_uri` plus source URL; it never changes finance.
+- Credentials, sessions, storage, approval, dispatch and Base writeback stay in the host. On a new Mac Mini run `collect_market_evidence.py --preflight --all-engines`; obey its install hints. The collector has no UI, database or workflow state and never silently swaps engine/Profile.
 
-1. Obtain a user-confirmed GCJ-02 center from an authorized map source; resolve ambiguity with the user.
-2. Collect same-provider candidates; use `complete` only after the defined search finishes, otherwise `partial`.
-3. Run the entrypoint; it applies the unrounded 0–2,000 m Haversine boundary and exposes gaps.
-4. Recommend ADR only with complete collection, valid shared `pricing_context`, at least three independent formal same-workstation properties, and `medium`/`high` confidence. Use the cross-property median, rounded to CNY 10.
-5. Explicitly select the financial revenue assumption; return conclusion, risks, confidence and missing evidence.
-6. For Base delivery, emit the manifest after this result; the authorized host writes it.
-
-## Non-negotiable rules
-
-- Formal competitors are operating `pure_esports_hotel` properties within 2km with the center's provider, place ID, GCJ-02 coordinates and source. Exclude incidental, non-lodging, closed, out-of-range and incomplete evidence; show low-confidence properties but never sample their ADR.
-- Never widen radius or infer coordinates, status, positioning, source, ADR, OCC or room facts. Incomplete evidence is `evidence_insufficient` and caps finance at `pre_evaluation_only`.
-- Finance is code-only: never calculate NPV, IRR, payback, break-even OCC or negotiation floors in prose, nor write competitor ADR into financial input automatically.
-- Visual evidence must bind to a formal `provider_place_id`; HTML accepts only JPEG/PNG/WebP `data:image/...;base64,...` bytes with caption and source URL, never remote images.
-- Credentials, external tools, storage, approval, dispatch and Base writeback stay in the host; this Skill owns no crawler, database or workflow state.
-
-## Run and read selectively
+## Commands
 
 ```bash
+python3 scripts/collect_market_evidence.py --input /path/to/collection-request.json \
+  --format skill-patch > /path/to/market-evidence-patch.json
 python3 scripts/run.py --input /path/to/skill-request.json \
   --defaults references/benchmark-defaults.json --format feishu
 ```
 
-Use `--format json` for structured output, `--format html > /path/to/competitor-research.html` for the responsive report, or `--format bitable > /path/to/bitable-delivery.json` for a standard Base manifest. Read `references/input-schema.md` for finance fields, `references/bitable-delivery.md` only for Base delivery, and `references/methodology.md` plus `references/decision-policy.md` only to explain results.
+Use `--format json`, `html`, or `bitable` on `run.py`. Read `references/market-evidence-collection.md` for contracts, `market-evidence-runtime.md` for Mac Mini/Hermes engines, `input-schema.md` for finance, `bitable-delivery.md` for Base, and `methodology.md`/`decision-policy.md` only to explain results.
