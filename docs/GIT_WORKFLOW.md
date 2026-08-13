@@ -29,8 +29,12 @@ git branch -vv
 - 密钥、`.env` 和授权凭证；
 - 可从 tag 重新生成的 ZIP 发布包。
 
+`.gitignore` 防止日常误加入；根目录与 Skill 目录的 `.gitattributes` 还会把 Office 文档、
+PDF 和普通图片从任何 Git archive 排除，防御一次 `git add -f`。这不是保存客户资料的替代
+机制：发现已跟踪的客户文件时，先停止发布、确认精确路径并用常规评审移除，再重新验证归档。
+
 核心测算只依赖 Python 标准库。唯一允许进入发布路径的外部采集运行时是
-`collector/` 中锁定、无界面且有 `market-evidence-collection/v1` 回执的页面
+`collector/` 中锁定、无界面且有 `market-evidence-collection/v2` 回执的页面
 Profile；不要加入地图/OTA SDK、未验证的爬虫、数据库、审批或消息平台代码。
 
 ## 2. 分支
@@ -72,7 +76,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
 git diff --cached --check
 ```
 
-归档边界测试使用暂存树，故 `git add -A` 必须在测试前执行。若修改冻结财务机械，
+归档边界测试使用暂存树，故 `git add -A` 必须在测试前执行；测试以生产子目录 archive
+做精确白名单比对，并额外核验根 archive 的客户 Office/图片排除属性。若修改冻结财务机械，
 额外执行 Golden Master；不要新增状态、审批、回放或未纳入页面采集契约的爬虫实现
 到当前发布路径。发布归档采用精确白名单，新增包内文件时必须同时说明业务必要性、
 更新归档测试并复核发布边界。

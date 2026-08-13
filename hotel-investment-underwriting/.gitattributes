@@ -1,4 +1,13 @@
 # Publish only the single-Skill runtime files when this directory is archived.
+*.xlsx export-ignore
+*.xls export-ignore
+*.docx export-ignore
+*.doc export-ignore
+*.pdf export-ignore
+*.png export-ignore
+*.jpg export-ignore
+*.jpeg export-ignore
+*.webp export-ignore
 scripts/* export-ignore
 scripts/calculate.py -export-ignore
 scripts/collect_market_evidence.py -export-ignore

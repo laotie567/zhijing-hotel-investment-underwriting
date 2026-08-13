@@ -15,3 +15,14 @@ docs/** export-ignore
 .gitignore export-ignore
 CHANGELOG.md export-ignore
 README.md export-ignore
+# Client office files and page captures are never release artefacts, even if
+# someone force-adds one while preparing a repository-root archive.
+*.xlsx export-ignore
+*.xls export-ignore
+*.docx export-ignore
+*.doc export-ignore
+*.pdf export-ignore
+*.png export-ignore
+*.jpg export-ignore
+*.jpeg export-ignore
+*.webp export-ignore

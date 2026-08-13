@@ -10,7 +10,7 @@
  * exposes its cancellation/tax scope. Otherwise the observation stays partial.
  */
 
-const CONTRACT_VERSION = "market-evidence-collection/v1";
+const CONTRACT_VERSION = "market-evidence-collection/v2";
 const PROFILE = "ctrip-hotel-v1";
 const MAX_EMBEDDED_BYTES = 7_500_000;
 const { createHash } = await import("node:crypto");
@@ -354,13 +354,17 @@ result.collection_gaps = gaps;
 // remains a completed spatial analysis even if live OTA rates are partial or
 // only P1; this preserves valid competitor and visual research while the ADR
 // gate continues to require P2 room offers.
-const spatialCollectionComplete = inventory.length > 0 && inventory.length < request.search.max_candidates;
+// Do not infer completeness from a local count: an exactly-200-property map
+// response can still be complete. The preceding map Profile has already
+// proved this pool and the contract requires us to echo it verbatim.
+const spatialCollectionComplete = request.candidate_pool?.status === "complete";
 result.competitor_analysis = {
   confirmed_location: request.target.center || null,
   collection_status: spatialCollectionComplete ? "complete" : "partial",
   pricing_context: request.pricing_context,
   candidates,
 };
+result.spatial_collection = request.candidate_pool;
 result.competitor_report = {
   title: `${request.target.name}：2km电竞竞品 OTA 报价与视觉证据`,
   candidate_media: media,

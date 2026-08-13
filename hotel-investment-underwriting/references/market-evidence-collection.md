@@ -1,14 +1,14 @@
 # 页面市场证据采集契约
 
 `scripts/collect_market_evidence.py` 是与测算 Skill 配套的无界面 Host Tool。
-它以 `market-evidence-collection/v1` 作为正式业务契约：任何 Agent 平台只需
+它以 `market-evidence-collection/v2` 作为正式业务契约：任何 Agent 平台只需
 调用 CLI 或本地 HTTP，不依赖 Codex Computer Use。
 
 ## 输入
 
 ```json
 {
-  "contract_version": "market-evidence-collection/v1",
+  "contract_version": "market-evidence-collection/v2",
   "target": {
     "name": "笨酒店",
     "address": "成都市成华区望平街滨河路6号",
@@ -18,7 +18,7 @@
     "provider_profile": "360-map-v1",
     "query": "电竞酒店",
     "radius_meters": 2000,
-    "max_candidates": 200,
+    "max_candidates": 1000,
     "max_benchmark_candidates": 8,
     "max_images_per_candidate": 1
   },
@@ -75,6 +75,14 @@ Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl、OpenCLI 是�
 `max_benchmark_candidates` 的默认值与硬上限都是 `8`。它只限制进入 OTA 价格、房型和
 图片深度调研的标杆数，绝不截断 2km 候选池；若页面候选数超过 `max_candidates`，结果
 必须标记为 `partial`，而不是悄悄遗漏候选。
+`max_candidates` 默认且最高为 1,000，是传输安全上限，不是标杆数量；超过它必须由
+采集器明确返回未完成的空间候选池，不能产出“全量 2km”结论。
+
+地图结果中的 `spatial_collection` 是二阶段的不可变交接件：包含完整状态、地图引擎/
+Profile、确认中心、全量候选数和按排序 `provider_place_id` 计算的 SHA-256。OTA 请求必须
+将它原样放入 `candidate_pool`，同时仍携带**全量** `candidate_inventory`；OTA 结果再原样
+回传为 `spatial_collection`。CLI 会拒绝任一引擎、Profile、中心、数量或指纹不一致的回执。
+这避免只传入已选 8 家标杆后，把不完整 2km 集合误称为完整。
 
 ## 完成条件与价格纪律
 
@@ -112,11 +120,16 @@ Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl、OpenCLI 是�
 Bridge。Ui.Vision 是**唯一**页面动作执行者；OpenCLI 只绑定同一标签页，读取动作前后
 的 Network 与 DOM。系统不读取 Cookie、请求头、令牌或原始 Network body。若没有显式
 `ota_property`，它只通过 `opencli ctrip search` 的唯一精确名称结果创建映射；多个或零个
-结果均返回 `HOTEL_MAPPING_AMBIGUOUS`，不猜测。
+结果均返回 `HOTEL_MAPPING_AMBIGUOUS`，不猜测。自动映射还必须从 `target.address` 解析出
+城市，并要求搜索返回同一城市；地址缺城市、城市缺失或不一致同样失败关闭。预检会执行
+无页面副作用的 `opencli ctrip search --help`，使缺少该本机插件在上线前可见。
 
 该 Profile 把真实页面所见的 P1/P2/P3 记录为 `pricing_observations`，供 HTML 与飞书
 展示；只有 P2 同时满足完全相同的报价条件、Network/DOM 价格一致、可订、税费、取消
-政策及机位数时，才另写入严格的 `room_offers` 并可参与 ADR。`NO_INVENTORY` 是已完成的
+政策及机位数时，才另写入严格的 `room_offers` 并可参与 ADR。页面没有回显请求的日期和
+人数时必记 `pricing_context_unverified`，即使 Network/DOM 数字相同也绝不能 ADR-eligible。
+公开图片只从酒店/房型/图库上下文选择，过滤账号头像、Logo 与二维码；所有标杆共用总
+嵌入体积上限 7.5MB，而非每家各自放大。`NO_INVENTORY` 是已完成的
 负向采集结果，不以空表或虚构价格代替；`AUTH_REQUIRED`、`CAPTCHA_REQUIRED`、
 `QUERY_MISMATCH`、`PRICE_MISMATCH`、`NETWORK_SCHEMA_DRIFT` 等以结构化
 `collection_issues` 返回。

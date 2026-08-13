@@ -52,19 +52,25 @@ independent income.
     "jwl": {"capex": {}, "opex_monthly": {}, "replacement": {"year": 3}},
     "owner": {"capex": {}, "incremental_opex_monthly": {}, "allocated_opex_monthly": {}},
     "finance": {"discount_rate": 0.1, "hurdle_irr": 0.2, "maximum_discounted_payback_years": 3, "exit_occ_safety_buffer": 0.1}
-  },
-  "competitor_analysis": {
-    "confirmed_location": {"...": "see skill-request schema"},
-    "collection_status": "complete",
-    "pricing_context": {"check_in_date": "2026-08-26", "nights": 1, "guests": 2, "currency": "CNY"},
-    "candidates": []
-  },
-  "competitor_report": {
-    "title": "可选的竞品调研报告标题",
-    "candidate_media": []
   }
 }
 ```
+
+这是仅财务预评估的最小统一请求。需要竞品、HTML 或 Bitable 交付时，必须把
+`collect_market_evidence.py --format skill-patch` 返回的三个字段**原样**合并：
+
+```json
+{
+  "project_input": {"...": "validated finance input"},
+  "market_evidence": {"...": "exact collection receipt"},
+  "competitor_analysis": {"...": "exact embedded receipt field"},
+  "competitor_report": {"...": "exact embedded receipt field"}
+}
+```
+
+不要手工构造或修改后两项：`run.py` 会校验它们与 `market_evidence` 完全相同。OTA
+二阶段还要求在采集时原样携带地图回执的 `candidate_pool`；完整示例见
+`market-evidence-collection.md`。
 
 Use the repository-only `sample-predeal-hotel.json` for a complete working
 financial example during development. Samples and tests are intentionally

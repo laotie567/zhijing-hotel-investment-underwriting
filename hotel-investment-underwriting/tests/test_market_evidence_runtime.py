@@ -70,6 +70,15 @@ class MarketEvidenceRuntimeTests(unittest.TestCase):
         self.assertEqual("ready", result["state"])
         self.assertNotIn("extension_id", result["details"])
 
+    def test_ctrip_mapping_plugin_probe_never_searches_a_real_hotel(self) -> None:
+        completed = market_evidence_runtime.subprocess.CompletedProcess(
+            args=["opencli", "ctrip", "search", "--help"], returncode=0
+        )
+        with patch.object(market_evidence_runtime.subprocess, "run", return_value=completed) as run:
+            self.assertTrue(market_evidence_runtime._ctrip_search_plugin_ready("opencli"))
+
+        self.assertEqual(["opencli", "ctrip", "search", "--help"], run.call_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

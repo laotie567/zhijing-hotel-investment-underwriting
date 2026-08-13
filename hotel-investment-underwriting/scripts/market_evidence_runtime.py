@@ -155,6 +155,22 @@ def _playwright_status() -> dict[str, Any]:
     return _status("ready", "Bundled Playwright runtime and Chromium browser are available.")
 
 
+def _ctrip_search_plugin_ready(opencli: str) -> bool:
+    """Verify the local OpenCLI Ctrip command without searching a hotel page."""
+
+    try:
+        probe = subprocess.run(
+            [opencli, "ctrip", "search", "--help"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=12,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
+
+
 def _ctrip_live_rates_status() -> dict[str, Any]:
     """Check only deployment prerequisites; never open a booking page or read a session."""
 
@@ -218,6 +234,18 @@ def _ctrip_live_rates_status() -> dict[str, Any]:
             "action_required",
             "OpenCLI Browser Bridge is not connected to the dedicated Chrome profile.",
             install_hint="Open Chrome with the ctrip-price-worker profile, enable OpenCLI Browser Bridge, then retry.",
+            details=details,
+        )
+    ctrip_search_ready = _ctrip_search_plugin_ready(opencli)
+    details["ctrip_search"] = {"ready": ctrip_search_ready}
+    if not ctrip_search_ready:
+        return _status(
+            "action_required",
+            "OpenCLI Ctrip search command is unavailable; automatic hotel mapping cannot be verified.",
+            install_hint=(
+                "Install or enable the approved OpenCLI Ctrip integration in the ctrip-price-worker "
+                "profile, then run `opencli ctrip search --help` and retry preflight."
+            ),
             details=details,
         )
     bridge_probe = _probe_uivision_bridge(bridge)

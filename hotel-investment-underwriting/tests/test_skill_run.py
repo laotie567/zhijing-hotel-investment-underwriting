@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 import sys
@@ -132,6 +134,56 @@ def competitor_report_input() -> dict:
     }
 
 
+def collected_request(project_input: dict, competitors: dict, report: dict | None = None) -> dict:
+    """Build one page-receipt-bound public Skill request for integration tests."""
+
+    timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    candidates = competitors["candidates"]
+    candidate_ids_sha256 = hashlib.sha256(
+        json.dumps(
+            sorted(candidate["provider_place_id"] for candidate in candidates),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    center = competitors["confirmed_location"]
+    receipt = {
+        "contract_version": "market-evidence-collection/v2",
+        "status": "partial",
+        "collector": {
+            "engine": "ego-browser",
+            "engine_version": "test",
+            "source_profile": "ctrip-hotel-v1",
+            "started_at": timestamp,
+            "finished_at": timestamp,
+            "page_sources": [{"url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1", "status": 200}],
+        },
+        "target_resolution": center,
+        "coverage": {
+            "candidates": {"status": "complete", "observed_count": len(candidates)},
+            "benchmark_set": {"status": "complete", "observed_count": len(candidates)},
+            "room_types": {"status": "complete", "observed_count": len(candidates)},
+            "images": {"status": "complete", "observed_count": len(candidates)},
+            "pricing": {"status": "partial", "observed_count": 0},
+        },
+        "collection_gaps": ["测试回执：严格报价仍待补齐"],
+        "competitor_analysis": competitors,
+        "competitor_report": report or {"candidate_media": []},
+        "spatial_collection": {
+            "status": "complete",
+            "source_engine": "playwright",
+            "source_profile": "360-map-v1",
+            "center": center,
+            "candidate_count": len(candidates),
+            "candidate_ids_sha256": candidate_ids_sha256,
+        },
+    }
+    request = {"project_input": project_input, "market_evidence": receipt}
+    if report is not None:
+        request["competitor_report"] = report
+    return request
+
+
 class SkillRunTests(unittest.TestCase):
     def setUp(self) -> None:
         self.project_input = json.loads(
@@ -143,11 +195,7 @@ class SkillRunTests(unittest.TestCase):
 
     def test_runs_mandatory_2km_analysis_and_financial_calculation_from_one_request(self) -> None:
         result = run.run(
-            {
-                "project_input": self.project_input,
-                "competitor_analysis": competitor_input(),
-            },
-            defaults=self.defaults,
+            collected_request(self.project_input, competitor_input()), defaults=self.defaults
         )
 
         self.assertEqual("ok", result["status"])
@@ -167,6 +215,16 @@ class SkillRunTests(unittest.TestCase):
             result["financial_result"],
         )
 
+    def test_complete_competitor_conclusion_requires_a_page_collection_receipt(self) -> None:
+        with self.assertRaisesRegex(run.SkillRunError, "market_evidence"):
+            run.run(
+                {
+                    "project_input": self.project_input,
+                    "competitor_analysis": competitor_input(),
+                },
+                defaults=self.defaults,
+            )
+
     def test_still_returns_a_low_evidence_pre_evaluation_when_competitor_collection_is_missing(self) -> None:
         result = run.run({"project_input": self.project_input}, defaults=self.defaults)
 
@@ -185,8 +243,7 @@ class SkillRunTests(unittest.TestCase):
         del competitors["candidates"][0]["source"]
 
         result = run.run(
-            {"project_input": self.project_input, "competitor_analysis": competitors},
-            defaults=self.defaults,
+            collected_request(self.project_input, competitors), defaults=self.defaults
         )
 
         self.assertEqual("evidence_insufficient", result["competitor_analysis"]["status"])
@@ -197,8 +254,7 @@ class SkillRunTests(unittest.TestCase):
         del competitors["pricing_context"]
 
         result = run.run(
-            {"project_input": self.project_input, "competitor_analysis": competitors},
-            defaults=self.defaults,
+            collected_request(self.project_input, competitors), defaults=self.defaults
         )
 
         self.assertEqual("ready_for_review", result["workflow"]["status"])
@@ -211,8 +267,7 @@ class SkillRunTests(unittest.TestCase):
             candidate["source"]["confidence"] = "low"
 
         result = run.run(
-            {"project_input": self.project_input, "competitor_analysis": competitors},
-            defaults=self.defaults,
+            collected_request(self.project_input, competitors), defaults=self.defaults
         )
 
         self.assertEqual("ready_for_review", result["workflow"]["status"])
@@ -270,11 +325,9 @@ class SkillRunTests(unittest.TestCase):
             self.assertIn("missing.json", stderr.getvalue())
 
     def test_cli_renders_a_self_contained_html_competitor_report(self) -> None:
-        request = {
-            "project_input": self.project_input,
-            "competitor_analysis": competitor_input(),
-            "competitor_report": competitor_report_input(),
-        }
+        request = collected_request(
+            self.project_input, competitor_input(), competitor_report_input()
+        )
         with TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             request_path = temporary_path / "request.json"
@@ -324,10 +377,7 @@ class SkillRunTests(unittest.TestCase):
         self.assertIn("p,li,th,td,h1,h2,h3,h4 { overflow-wrap:anywhere; }", rendered)
 
     def test_html_visual_benchmark_exposes_an_evidence_gap_without_media(self) -> None:
-        request = {
-            "project_input": self.project_input,
-            "competitor_analysis": competitor_input(),
-        }
+        request = collected_request(self.project_input, competitor_input())
         result = run.run(request, defaults=self.defaults)
 
         rendered = run.competitor_report.render_competitor_report(result, request)
@@ -341,11 +391,7 @@ class SkillRunTests(unittest.TestCase):
         report_input["candidate_media"][0]["images"][0]["data_uri"] = (
             "https://example.com/room.jpg"
         )
-        request = {
-            "project_input": self.project_input,
-            "competitor_analysis": competitor_input(),
-            "competitor_report": report_input,
-        }
+        request = collected_request(self.project_input, competitor_input(), report_input)
         result = run.run(request, defaults=self.defaults)
 
         with self.assertRaises(run.competitor_report.CompetitorReportError) as caught:
@@ -354,14 +400,11 @@ class SkillRunTests(unittest.TestCase):
         self.assertIn("data_uri", str(caught.exception))
 
     def test_cli_returns_a_controlled_error_for_invalid_html_evidence(self) -> None:
-        request = {
-            "project_input": self.project_input,
-            "competitor_analysis": competitor_input(),
-            "competitor_report": competitor_report_input(),
-        }
-        request["competitor_report"]["candidate_media"][0]["images"][0]["data_uri"] = (
+        report_input = competitor_report_input()
+        report_input["candidate_media"][0]["images"][0]["data_uri"] = (
             "https://example.com/room.jpg"
         )
+        request = collected_request(self.project_input, competitor_input(), report_input)
         with TemporaryDirectory() as temporary_directory:
             request_path = Path(temporary_directory) / "request.json"
             request_path.write_text(json.dumps(request, ensure_ascii=False), encoding="utf-8")
@@ -379,11 +422,7 @@ class SkillRunTests(unittest.TestCase):
     def test_rejects_report_media_not_bound_to_a_submitted_candidate(self) -> None:
         report_input = competitor_report_input()
         report_input["candidate_media"][0]["provider_place_id"] = "unrelated-place"
-        request = {
-            "project_input": self.project_input,
-            "competitor_analysis": competitor_input(),
-            "competitor_report": report_input,
-        }
+        request = collected_request(self.project_input, competitor_input(), report_input)
         result = run.run(request, defaults=self.defaults)
 
         with self.assertRaises(run.competitor_report.CompetitorReportError) as caught:
@@ -394,11 +433,7 @@ class SkillRunTests(unittest.TestCase):
     def test_rejects_report_media_bound_to_an_excluded_candidate(self) -> None:
         competitors = competitor_input()
         competitors["candidates"][0]["esports_positioning"] = "incidental"
-        request = {
-            "project_input": self.project_input,
-            "competitor_analysis": competitors,
-            "competitor_report": competitor_report_input(),
-        }
+        request = collected_request(self.project_input, competitors, competitor_report_input())
         result = run.run(request, defaults=self.defaults)
 
         with self.assertRaises(run.competitor_report.CompetitorReportError) as caught:
@@ -407,10 +442,7 @@ class SkillRunTests(unittest.TestCase):
         self.assertIn("absent from the formal competitor set", str(caught.exception))
 
     def test_html_default_title_comes_from_the_financial_result(self) -> None:
-        request = {
-            "project_input": self.project_input,
-            "competitor_analysis": competitor_input(),
-        }
+        request = collected_request(self.project_input, competitor_input())
         result = run.run(request, defaults=self.defaults)
 
         rendered = run.competitor_report.render_competitor_report(result, request)
@@ -421,10 +453,7 @@ class SkillRunTests(unittest.TestCase):
         )
 
     def test_html_report_surfaces_month_level_payback_from_the_core_result(self) -> None:
-        request = {
-            "project_input": self.project_input,
-            "competitor_analysis": competitor_input(),
-        }
+        request = collected_request(self.project_input, competitor_input())
         result = run.run(request, defaults=self.defaults)
         jwl = result["financial_result"]["base_case"]["jwl"]
 
@@ -439,14 +468,10 @@ class SkillRunTests(unittest.TestCase):
         )
 
     def test_report_evidence_does_not_change_the_core_underwriting_result(self) -> None:
-        core_request = {
-            "project_input": self.project_input,
-            "competitor_analysis": competitor_input(),
-        }
-        report_request = {
-            **core_request,
-            "competitor_report": competitor_report_input(),
-        }
+        core_request = collected_request(self.project_input, competitor_input())
+        report_request = collected_request(
+            self.project_input, competitor_input(), competitor_report_input()
+        )
 
         core_result = run.run(core_request, defaults=self.defaults)
         report_result = run.run(report_request, defaults=self.defaults)

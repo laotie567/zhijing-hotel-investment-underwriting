@@ -1,5 +1,5 @@
 /**
- * Ctrip live-rate collector for market-evidence-collection/v1.
+ * Ctrip live-rate collector for market-evidence-collection/v2.
  *
  * This is intentionally a narrow adapter inside the underwriting Skill, not a
  * crawler service. Ui.Vision is the only component that changes the Ctrip
@@ -9,19 +9,20 @@
  */
 
 import { createHash } from "node:crypto";
-import { openSync, closeSync, unlinkSync } from "node:fs";
+import { closeSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const CONTRACT_VERSION = "market-evidence-collection/v1";
+const CONTRACT_VERSION = "market-evidence-collection/v2";
 const PROFILE = "ctrip-live-rates-v1";
 const ENGINE = "ctrip-live-rates";
 const MACRO_NAME = "zhijing-ctrip-wait-rates-v1";
 const MAX_EMBEDDED_BYTES = 7_500_000;
 const MAX_NETWORK_DETAILS = 24;
 const MAX_IMAGES_PER_CANDIDATE = 4;
+const LOCK_MAX_AGE_MS = 12 * 60 * 1_000;
 
 function now() {
   return new Date().toISOString();
@@ -101,6 +102,15 @@ function mappingName(value) {
     .split(/[，,]/, 1)[0]
     .toLowerCase()
     .replace(/[\s\-_,，。·()（）]/g, "");
+}
+
+function cityFromAddress(value) {
+  const matched = compact(value, 500).match(/([\u4e00-\u9fff]{2,20})市/);
+  return matched ? compact(matched[1], 40) : "";
+}
+
+function normalizedCity(value) {
+  return compact(value, 80).replace(/市$/, "");
 }
 
 function parseJson(value) {
@@ -273,15 +283,45 @@ async function openCli(args, timeoutMs) {
   return { ...response, json };
 }
 
-function acquireLock() {
+function lockIsStale(lockPath, referenceTime = Date.now()) {
+  try {
+    const metadata = JSON.parse(readFileSync(lockPath, "utf8"));
+    const pid = Number(metadata?.pid);
+    if (Number.isInteger(pid) && pid > 0) {
+      try {
+        // A live job may legitimately exceed the normal age threshold while
+        // eight rate pages wait for a human browser. Never steal that lock.
+        process.kill(pid, 0);
+        return false;
+      } catch (error) {
+        return error?.code === "ESRCH";
+      }
+    }
+    const startedAt = Date.parse(metadata?.started_at || "");
+    return Number.isFinite(startedAt) && referenceTime - startedAt > LOCK_MAX_AGE_MS;
+  } catch {
+    try {
+      return referenceTime - statSync(lockPath).mtimeMs > LOCK_MAX_AGE_MS;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function acquireLock(retried = false) {
   const lockPath = path.join(os.tmpdir(), "zhijing-ctrip-price-worker.lock");
   try {
     const fd = openSync(lockPath, "wx");
+    writeFileSync(fd, JSON.stringify({ pid: process.pid, started_at: now() }));
     return () => {
       try { closeSync(fd); } catch { /* nothing to do */ }
       try { unlinkSync(lockPath); } catch { /* nothing to do */ }
     };
   } catch {
+    if (!retried && lockIsStale(lockPath)) {
+      try { unlinkSync(lockPath); } catch { /* another process resolved it */ }
+      return acquireLock(true);
+    }
     throw new Error("Ctrip price worker is busy; wait for the active collection to finish");
   }
 }
@@ -294,6 +334,9 @@ function extractPropertyId(value) {
 async function resolveOtaProperty(item, city) {
   if (item.ota_property) return { ota: item.ota_property, issue: null };
   const candidate = item.candidate || {};
+  if (!city) {
+    return { ota: null, issue: issue("HOTEL_MAPPING_AMBIGUOUS", "目标地址未提供可核验城市；不会自动按酒店名称映射携程报价页。", true, candidate.provider_place_id) };
+  }
   let response;
   try {
     response = await openCli(["ctrip", "search", candidate.name, "--limit", "10", "--format", "json"], 30_000);
@@ -303,7 +346,7 @@ async function resolveOtaProperty(item, city) {
   const matches = (Array.isArray(response.json) ? response.json : [])
     .filter((record) => record && typeof record === "object")
     .filter((record) => mappingName(record.name) === mappingName(candidate.name))
-    .filter((record) => !city || !record.cityName || compact(record.cityName) === compact(city));
+    .filter((record) => normalizedCity(record.cityName) === normalizedCity(city));
   if (matches.length !== 1 || !matches[0].url || !(matches[0].id || extractPropertyId(matches[0].url))) {
     return { ota: null, issue: issue("HOTEL_MAPPING_AMBIGUOUS", "携程搜索未形成唯一的酒店实体映射；不会按名称猜测报价页。", true, candidate.provider_place_id) };
   }
@@ -445,10 +488,11 @@ function matchRates(network, dom) {
   return matches;
 }
 
-function observation(match, context, sourceUrl, observedAt) {
+function observation(match, context, sourceUrl, observedAt, contextVerified = true) {
   const rate = match.network;
   const dom = match.dom;
   const gaps = [];
+  if (!contextVerified) gaps.push("pricing_context_unverified");
   if (!match.price_match) gaps.push("network_dom_price_mismatch");
   if (rate.availability !== "available") gaps.push("availability_not_confirmed");
   if (rate.tax_included === null || dom?.tax_included === null) gaps.push("tax_scope_unknown");
@@ -498,11 +542,17 @@ async function fetchImage(imageUrl, pageSources, remainingBytes) {
 const DOM_FACTS_SCRIPT = `(() => {
   const compact = (v, n = 1500) => String(v || '').replace(/\\s+/g, ' ').trim().slice(0, n);
   const body = String(document.body?.innerText || '').slice(0, 120000);
+  const imageContext = (image) => [
+    image.alt, image.className, image.parentElement?.className,
+    image.parentElement?.parentElement?.className
+  ].map((value) => String(value || '')).join(' ');
   const images = [...document.images].map((image) => ({
     url: compact(image.currentSrc || image.src || image.getAttribute('data-src'), 4000),
     alt: compact(image.alt, 240), width: Number(image.naturalWidth || image.width || 0),
-    height: Number(image.naturalHeight || image.height || 0)
-  })).filter((item) => item.url.startsWith('http') && item.width >= 160 && item.height >= 100).slice(0, 12);
+    height: Number(image.naturalHeight || image.height || 0), context: imageContext(image)
+  })).filter((item) => item.url.startsWith('http') && item.width >= 160 && item.height >= 100)
+    .filter((item) => /酒店|房型|客房|room|hotel|gallery|album/i.test(item.context))
+    .filter((item) => !/avatar|logo|qrcode|二维码/i.test(item.context)).slice(0, 12);
   const blocks = []; const seen = new Set();
   for (const element of [...document.querySelectorAll('div,li,section,article')]) {
     const text = String(element.innerText || '').trim();
@@ -514,9 +564,9 @@ const DOM_FACTS_SCRIPT = `(() => {
   return { title: document.title, body, images, room_blocks: blocks };
 })()`;
 
-async function collectOne(bridge, item, request, pageSources) {
+async function collectOne(bridge, item, request, pageSources, imageBudget) {
   const candidate = item.candidate;
-  const mapping = await resolveOtaProperty(item, request.target.city_id === "510100" ? "成都" : "");
+  const mapping = await resolveOtaProperty(item, cityFromAddress(request.target.address));
   if (!mapping.ota) return { candidate, issue: mapping.issue, roomTypes: [], observations: [], offers: [], media: null, noInventory: false };
   const bookingUrl = ctripBookingUrl(mapping.ota, request.pricing_context);
   if (!bookingUrl) {
@@ -551,7 +601,13 @@ async function collectOne(bridge, item, request, pageSources) {
     const dom = domRates(facts);
     const contextVerified = verifyContext(facts.body, request.pricing_context);
     const matches = matchRates(network, dom);
-    const observations = matches.map((match) => observation(match, request.pricing_context, safeUrl, observedAt));
+    const observations = matches.map((match) => observation(
+      match,
+      request.pricing_context,
+      safeUrl,
+      observedAt,
+      contextVerified,
+    ));
     const roomTypes = [...new Set([
       ...dom.map((row) => row.room_name),
       ...network.map((row) => row.room_name),
@@ -571,12 +627,13 @@ async function collectOne(bridge, item, request, pageSources) {
         source_url: safeUrl,
         observed_at: observedAt,
       }));
-    let bytes = 0;
     const images = [];
     for (const image of (Array.isArray(facts.images) ? facts.images : []).slice(0, Math.min(request.search.max_images_per_candidate, MAX_IMAGES_PER_CANDIDATE))) {
-      const itemImage = await fetchImage(image.url, pageSources, MAX_EMBEDDED_BYTES - bytes);
+      const itemImage = await fetchImage(image.url, pageSources, imageBudget.remainingBytes);
       if (!itemImage) continue;
-      bytes += Buffer.byteLength(itemImage.data_uri, "utf8");
+      const encodedBytes = Buffer.byteLength(itemImage.data_uri, "utf8");
+      if (encodedBytes > imageBudget.remainingBytes) continue;
+      imageBudget.remainingBytes -= encodedBytes;
       images.push({
         caption: compact(image.alt || "携程公开酒店/房型图（仅作视觉对标）", 240),
         data_uri: itemImage.data_uri,
@@ -613,6 +670,7 @@ async function collectOne(bridge, item, request, pageSources) {
         images,
       } : null,
       noInventory,
+      contextVerified,
     };
   } catch (error) {
     return {
@@ -650,6 +708,9 @@ function baseResult(request, startedAt) {
       candidates: [],
     },
     competitor_report: { title: `${request.target.name}：2km电竞竞品携程报价与视觉证据`, candidate_media: [] },
+    // An OTA adapter must echo the immutable map-pool proof even when its
+    // browser bridge fails before it can collect a single property page.
+    spatial_collection: request.candidate_pool,
   };
 }
 
@@ -666,6 +727,12 @@ async function collect(request) {
     room_offers: [],
     pricing_observations: [],
   }));
+  // The map profile owns the 2km boundary.  Preserve its completed population
+  // on every return path; live pricing and visual coverage are separate axes.
+  result.competitor_analysis.collection_status = request.candidate_pool.status;
+  result.competitor_analysis.candidates = candidates;
+  result.coverage.candidates = coverage("complete", candidates.length);
+  result.coverage.benchmark_set = coverage("complete", selected.length);
   if (!inventory.length || !selected.length) {
     result.collection_gaps.push("ctrip-live-rates 需要完整 2km candidate_inventory 和至少一个标记的 benchmark_selected 候选。");
     result.collector.finished_at = now();
@@ -686,13 +753,14 @@ async function collect(request) {
     await ensureMacro(bridge);
     const pageSources = result.collector.page_sources;
     const outcomes = [];
-    for (const item of selected) outcomes.push(await collectOne(bridge, item, request, pageSources));
+    const imageBudget = { remainingBytes: MAX_EMBEDDED_BYTES };
+    for (const item of selected) outcomes.push(await collectOne(bridge, item, request, pageSources, imageBudget));
     const byId = new Map(outcomes.map((outcome) => [outcome.candidate.provider_place_id, outcome.candidate]));
     result.competitor_analysis.candidates = candidates.map((candidate) => byId.get(candidate.provider_place_id) || candidate);
     result.competitor_report.candidate_media = outcomes.map((outcome) => outcome.media).filter(Boolean);
     result.collection_issues = outcomes.map((outcome) => outcome.issue).filter(Boolean);
     const roomTypes = outcomes.reduce((sum, outcome) => sum + outcome.roomTypes.length, 0);
-    const priceObserved = outcomes.filter((outcome) => outcome.observations.length || outcome.noInventory).length;
+    const priceObserved = outcomes.filter((outcome) => outcome.contextVerified && (outcome.observations.length || outcome.noInventory)).length;
     const imageObserved = outcomes.filter((outcome) => outcome.media?.images?.length).length;
     const retryableIssues = result.collection_issues.filter((item) => item.retryable);
     const roomTypesComplete = !request.required_evidence.room_types || roomTypes > 0;
@@ -707,7 +775,11 @@ async function collect(request) {
       pricing: coverage(pricingComplete ? "complete" : "partial", priceObserved),
     };
     result.collection_gaps = result.collection_issues.map((item) => `${item.code}：${item.message}`);
-    result.competitor_analysis.collection_status = complete ? "complete" : "partial";
+    // Price coverage may remain partial, but this collector was handed the
+    // exact completed map pool. Preserve the spatial conclusion and let ADR
+    // eligibility depend on the price coverage/offer gates instead.
+    result.competitor_analysis.collection_status = request.candidate_pool.status;
+    result.spatial_collection = request.candidate_pool;
     result.status = complete ? "complete" : "partial";
     return result;
   } catch (error) {
@@ -730,4 +802,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(JSON.stringify(result));
 }
 
-export { addNights, ctripBookingUrl, domRates, mappingName, matchRates, networkRates, normalizedName, observation, verifyContext };
+export {
+  addNights,
+  cityFromAddress,
+  ctripBookingUrl,
+  domRates,
+  lockIsStale,
+  mappingName,
+  matchRates,
+  networkRates,
+  normalizedName,
+  observation,
+  verifyContext,
+};

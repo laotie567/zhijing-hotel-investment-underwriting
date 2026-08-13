@@ -56,6 +56,11 @@ def _normalize_request(request: Mapping[str, Any]) -> dict[str, Any]:
     normalized = dict(request)
     raw_receipt = request.get("market_evidence")
     if raw_receipt is None:
+        if request.get("competitor_analysis") is not None or request.get("competitor_report") is not None:
+            raise SkillRunError(
+                "market_evidence is required for competitor analysis, HTML visual evidence, "
+                "or Feishu competitor delivery; without it only a financial pre-evaluation may run"
+            )
         return normalized
     try:
         patch = market_evidence_contract.skill_request_patch(raw_receipt)

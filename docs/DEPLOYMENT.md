@@ -27,7 +27,7 @@ git archive --format=zip --output hotel-investment-underwriting-vX.Y.Z.zip \
 
 - Python 3.10+；核心测算只依赖标准库；
 - 页面证据采集默认需要 Node 20+、`collector/package-lock.json` 和 Chromium；安装命令见 `references/market-evidence-collection.md`；
-- Mac Mini/Hermes 在首次运行前必须执行 `python3 scripts/collect_market_evidence.py --preflight --all-engines`；Ego Lite、Ui.Vision+OpenCLI 或 Kimi WebBridge 未安装/未连接时，按输出的 `install_hint` 安装并重启 Hermes。Ego Lite 与 Ui.Vision+OpenCLI 仅用于本机 macOS 认证页面会话，不替代云端采集器；
+- Mac Mini/Hermes 在首次运行前必须执行 `python3 scripts/collect_market_evidence.py --preflight --all-engines`；Ego Lite、Ui.Vision+OpenCLI、OpenCLI Ctrip 搜索命令或 Kimi WebBridge 未安装/未连接时，按输出的 `install_hint` 安装并重启 Hermes。Ego Lite 与 Ui.Vision+OpenCLI 仅用于本机 macOS 认证页面会话，不替代云端采集器；
 - 宿主安全注入已授权页面来源会话/凭证；Skill 不读取或保存凭证；
 - 宿主按需要保存请求、结果和发送消息；Skill 不要求数据库、持久状态目录或守护进程。`ctrip-live-rates` 仅在单次运行期间创建并删除临时浏览器互斥锁。
 
@@ -58,7 +58,8 @@ npm install -g uivision-mcp-bridge@1.1.1
 python3 scripts/collect_market_evidence.py --preflight --engine ctrip-live-rates
 ```
 
-实时价采集严格由 Ui.Vision 改变页面状态、OpenCLI 只读 Network/DOM；回执不含 Cookie、
+实时价采集严格由 Ui.Vision 改变页面状态、OpenCLI 只读 Network/DOM；预检还验证本机
+`opencli ctrip search --help`，以保证自动映射所需的 Ctrip 命令真实可用。回执不含 Cookie、
 请求头、令牌或原始响应 body。未登录、验证码、房源映射歧义、无库存和页面结构变动会
 返回明确的 `collection_issues`，而非静默写入空报价或伪 ADR。
 
@@ -75,15 +76,16 @@ Ego Lite 登录态仅驻留在这台 Mac Mini。若 OTA 显示“登录看低价
 
 ## 宿主调用顺序
 
-1. 先用 `360-map-v1` 采集中心点和全量同源 2km 候选；再把明确选出的 `benchmark_selected` 候选交给 `ctrip-hotel-v1` 或 `ctrip-live-rates-v1`。前者要求显式 OTA 实体映射；后者只接受唯一精确的携程搜索映射。它返回房型/图片、页面价格观察、严格报价覆盖度和页面回执。
-2. 只有全量候选以及本次标杆集所需的房型、图片、同条件报价覆盖度均为 `complete` 时，才可把 `competitor_analysis.collection_status` 设为 `complete`；否则保留 `partial`。
+1. 先用 `360-map-v1` 采集中心点和全量同源 2km 候选，保存回执中的 `spatial_collection`；再把**全量**候选和这份原样 `candidate_pool` 交给 `ctrip-hotel-v1` 或 `ctrip-live-rates-v1`。前者要求显式 OTA 实体映射；后者只接受名称与地址城市都唯一精确的携程搜索映射。OTA 回执必须原样返回该池，且运行器拒绝引擎/Profile/中心/候选指纹不匹配。
+2. `competitor_analysis.collection_status=complete` 只表示全量 2km 空间候选已被证明完成。房型、图片、同条件报价的 `partial` 仍使**采集回执**为 `partial`，阻止 ADR 或完整交付，但不会把已完成的空间竞品集合降级为未完成。
 3. 把 `--format skill-patch` 输出与项目财务输入组装为统一请求并调用 `scripts/run.py`。
 4. 先读取 `workflow.status`，再展示竞品和财务结果。
 5. 如需交付竞品调研，使用相同请求执行 `--format html` 并将标准输出保存为 `.html` 文件。
 6. 如需交付飞书多维表格，使用相同请求执行 `--format bitable` 并将标准输出保存为 JSON 清单；先检查 `delivery_gate.final_delivery_eligible`。为 `false` 时只能写入带待补记录的草稿，不能称为完整交付；为 `true` 时仍先写入“待写入核验”，只有宿主上传并读回所有附件、关联和记录后才更新为“可交付”。已授权宿主按 `references/bitable-delivery.md` 创建/迁移模板并写入。Skill 本身不持有飞书凭证或写入状态。
 
-无法确认点位、页面采集失败/不完整、OTA 映射不完整、候选证据不完整或重复 `provider_place_id` 时，Skill 返回
-`pre_evaluation_only`，而不是伪造完整的竞品结论。
+无法确认点位、空间候选池不完整、候选证据不完整或重复 `provider_place_id` 时，Skill 返回
+`pre_evaluation_only`，而不是伪造完整的竞品结论。OTA 映射、图片或价格不完整会保留
+已确认的空间结论，同时将缺口和不可用 ADR 清晰写入结果与交付物。
 
 ```bash
 python3 hotel-investment-underwriting/scripts/run.py \

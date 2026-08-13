@@ -4,7 +4,7 @@
 
 1. 收集地址、计划改造房量、合同/成本/收入假设。
 2. 由宿主调用 `scripts/collect_market_evidence.py`；存在歧义时让用户选择同源地图点位后重试。
-3. 读取页面采集回执的五项覆盖度。候选必须完成全量 2km 收集；标杆集、房型、图片和同条件报价按选中的价格/视觉标杆核验。任一要求未满足则保留 `partial`，先补证。
+3. 分开读取两类状态：`spatial_collection`/`competitor_analysis.collection_status` 证明全量 2km 候选是否完成；五项覆盖度和 `collection_result.status` 说明标杆房型、图片及价格是否齐全。OTA 任一维度未完成会使回执为 `partial` 并阻止 ADR，但不会抹掉已完成的空间竞品结论。
 4. 将其 `skill-patch` 合并进项目财务输入，执行 `scripts/run.py`。
 5. 先看竞品状态，再看财务结论；需要时补充数据并重新运行。
 6. 需要交付竞品调研时，以同一请求执行 `--format html > competitor-research.html`；将该单文件交给业务方，无需一并交付 Skill 目录。
@@ -14,8 +14,8 @@
 
 | 结果 | 含义 | 下一步 |
 |---|---|---|
-| `ready_for_review` | 2km 候选集完整，已完成正式竞品筛选 | 审核 ADR 参考，明确选择财务收入假设。 |
-| `pre_evaluation_only` | 点位、候选集或竞品证据不完整 | 补齐对应缺失项，不将结果称为完整竞品结论。 |
+| `ready_for_review` | 全量 2km 候选集完整，已完成正式竞品筛选 | 审核当前可用证据；若价格/图片为 partial，先补证，ADR 仍不可用。明确选择财务收入假设。 |
+| `pre_evaluation_only` | 点位或全量 2km 空间候选证据不完整 | 补齐空间证据，不将结果称为完整竞品结论。 |
 | `needs_location_confirmation` | 中心点未确认 | 回到宿主完成地图候选选择。 |
 | `evidence_insufficient` | 候选集部分采集、来源缺失或重复地图 ID | 保留现有候选与排除原因，补证而不扩大半径。 |
 
@@ -23,7 +23,10 @@
 
 - 无法确认地址：不要让模型猜坐标；请求更精确地址或用户选择地图候选。
 - 页面采集器不可用或 Profile 返回的页面结构变更：不要静默换源或回填旧数据；记录引擎/Profile/页面回执，修复或切换为另一个明确配置的页面引擎后重跑。
-- 新 Mac Mini/Hermes：先执行 `collect_market_evidence.py --preflight --all-engines`；若 Ego Lite/Kimi WebBridge 不在 `ready`，将 `install_hint` 展示给管理员并停止相应采集，不得伪造登录态或降级为无口径报价。
+- OTA 二阶段请求被拒绝：确认传入的是地图回执原样的完整 `candidate_pool`；引擎、Profile、中心点、候选数量和 provider-place-ID 哈希都必须与回执相符，不能手工删改或只传 8 家标杆。
+- 携程自动映射失败：`ctrip-live-rates-v1` 只在酒店名唯一精确且地址含可核验城市、搜索结果城市也一致时自动映射；补齐 `target.address` 或改为人工确认 `ota_property`，不要按名称猜测。
+- 实时报价预检失败：完成 Ui.Vision 配对、OpenCLI Browser Bridge 连接，并确保 `opencli ctrip search --help` 可用。旧的中断锁会在记录进程已不存在时自动回收；只有没有有效 PID 的异常锁才按 12 分钟过期回收。仍显示 busy 时等待当前任务结束，不要手工抢占活跃浏览器。
+- 新 Mac Mini/Hermes：先执行 `collect_market_evidence.py --preflight --all-engines`；若 Ego Lite、携程实时价 Worker 或 Kimi WebBridge 不在 `ready`，将 `install_hint` 展示给管理员并停止相应采集，不得伪造登录态或降级为无口径报价。
 - 需要验证“不依赖 Codex Computer Use”的部署：以同一请求分别运行 `--engine playwright` 与 `--engine ego-browser`，检查两个页面回执和 `collector.engine`；不要使用桌面操作录屏或模型摘录替代 CLI 输出。完整步骤见 `END_TO_END_ACCEPTANCE.md`。
 - 2km 内没有合格竞品：如采集标记为 `complete`，这是有效结论；不要扩大半径来凑样本。
 - 有竞品但同机位少于三家独立物业：展示竞品，不输出对应机位 ADR 建议。

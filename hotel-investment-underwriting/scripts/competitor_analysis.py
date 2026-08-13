@@ -240,6 +240,12 @@ def _candidate_result(candidate: Any, center: Mapping[str, Any]) -> dict[str, An
             else []
         ),
     }
+    benchmark_rank = candidate.get("benchmark_rank")
+    if result["benchmark_selected"] and isinstance(benchmark_rank, int) and not isinstance(benchmark_rank, bool) and 1 <= benchmark_rank <= 8:
+        result["benchmark_rank"] = benchmark_rank
+    benchmark_reason = candidate.get("benchmark_selection_reason")
+    if result["benchmark_selected"] and isinstance(benchmark_reason, str) and benchmark_reason.strip():
+        result["benchmark_selection_reason"] = benchmark_reason.strip()[:500]
     if not {"coordinate_system", "longitude", "latitude"}.intersection(pending):
         distance = _haversine_meters(
             float(center["longitude"]),

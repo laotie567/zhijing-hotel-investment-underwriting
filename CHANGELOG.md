@@ -1,5 +1,30 @@
 # 变更记录
 
+## 1.0.0 - 2026-08-14
+
+### Breaking changes / migration
+
+- 页面市场证据契约升级为 `market-evidence-collection/v2`。旧 `v1` 页面回执和 OTA 请求不会被新运行器接受：先以新的地图 Profile 重跑 2km 候选池，再把其完整 `candidate_inventory` 与原样 `spatial_collection` 作为 OTA 的 `candidate_pool` 重新采集。
+- `run.py` 不再接受脱离页面采集回执的 `competitor_analysis` 或 `competitor_report`。宿主必须把 `--format skill-patch` 的完整 `market_evidence` 一并传入；只做纯财务预评估时可不带市场证据。
+
+### Fixed
+
+- 强制将页面采集回执绑定到唯一 `market_evidence`：没有回执的竞品分析、HTML 视觉证据或飞书竞品交付全部在唯一入口失败；只有纯财务预评估可无市场回执运行。
+- 新增地图→OTA 的不可变空间交接：OTA 请求必须携带完整 `candidate_pool`，含确认中心、地图引擎/Profile、候选数和排序地点 ID 的 SHA-256；结果必须原样回传为 `spatial_collection`。CLI 额外拒绝引擎、Profile、中心或候选池错配。
+- 统一两条状态轴：全量 2km 空间池完成后可保留 `ready_for_review`，即使 OTA 房型/图片/价格回执为 `partial`；后者仍严格阻断 ADR，并在 HTML/Base 交付中保留待补项。
+- 携程 P2 页面未回显请求日期和人数时固定写入 `pricing_context_unverified`，永不 ADR-eligible；自动携程映射改为名称唯一精确且地址/搜索城市一致才可进行。
+- 携程公开图片仅接受酒店、房型或图库上下文，排除头像、Logo、二维码；所有标杆共用 7.5MB 嵌入图片预算。
+- 携程实时价临时锁增加死进程恢复；只有无有效 PID 的异常锁按 12 分钟过期，避免异常中断后永久阻塞且不抢占活跃浏览器。
+
+### Added
+
+- 2km 竞品调研保留固定深调标杆的 `benchmark_rank` 与 `benchmark_selection_reason`；HTML 与飞书 `2km竞品` 表可追溯最多 8 家标杆为什么被优先采集。
+- 携程实时价预检新增无副作用的 `opencli ctrip search --help` 检查，缺少自动映射插件会给出明确安装动作。
+
+### Validation
+
+- 新增无回执竞品注入拒绝、完整空间池证明、OTA 回执绑定、P2 上下文资格、地址城市解析、死锁恢复、标杆理由和飞书标杆字段回归；文档、请求 schema、部署步骤和端到端验收同步为同一状态模型。
+
 ## 0.13.0 - 2026-08-13
 
 ### Added

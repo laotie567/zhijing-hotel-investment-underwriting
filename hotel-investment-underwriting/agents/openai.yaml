@@ -1,4 +1,4 @@
 interface:
   display_name: "电竞酒店投测与页面竞品证据"
-  short_description: "2km竞品、Ego页面证据、投资测算与HTML/飞书交付"
+  short_description: "2km竞品、页面证据、投资测算与HTML/飞书交付"
   default_prompt: "Use $hotel-investment-underwriting to collect full 2km and OTA benchmark evidence, underwrite a hotel, and generate HTML or Feishu Bitable delivery."

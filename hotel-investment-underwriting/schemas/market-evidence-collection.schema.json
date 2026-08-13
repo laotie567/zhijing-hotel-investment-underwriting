@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["contract_version", "target", "search", "pricing_context"],
   "properties": {
-    "contract_version": {"const": "market-evidence-collection/v1"},
+    "contract_version": {"const": "market-evidence-collection/v2"},
     "request_id": {"type": "string", "minLength": 1, "maxLength": 200},
     "target": {
       "type": "object",
@@ -26,14 +26,14 @@
         "provider_profile": {"enum": ["360-map-v1", "ctrip-hotel-v1", "ctrip-live-rates-v1"]},
         "query": {"type": "string", "minLength": 1, "maxLength": 100},
         "radius_meters": {"type": "integer", "minimum": 1, "maximum": 2000},
-        "max_candidates": {"type": "integer", "minimum": 1, "maximum": 200},
+        "max_candidates": {"type": "integer", "minimum": 1, "maximum": 1000},
         "max_benchmark_candidates": {"type": "integer", "minimum": 0, "maximum": 8},
         "max_images_per_candidate": {"type": "integer", "minimum": 0, "maximum": 4}
       }
     },
     "candidate_inventory": {
       "type": "array",
-      "maxItems": 200,
+      "maxItems": 1000,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -54,6 +54,20 @@
             }
           }
         }
+      }
+    },
+    "candidate_pool": {
+      "description": "Immutable proof that an OTA Profile received the exact complete 2km map population.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "source_engine", "source_profile", "center", "candidate_count", "candidate_ids_sha256"],
+      "properties": {
+        "status": {"const": "complete"},
+        "source_engine": {"enum": ["playwright", "ego-browser", "kimi-webbridge", "crawl4ai", "xcrawl", "opencli"]},
+        "source_profile": {"const": "360-map-v1"},
+        "center": {"$ref": "skill-request.schema.json#/properties/competitor_analysis/properties/confirmed_location"},
+        "candidate_count": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "candidate_ids_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
     "pricing_context": {
@@ -77,5 +91,20 @@
         "benchmark_set": {"type": "boolean"}
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "search": {
+            "properties": {
+              "provider_profile": {"enum": ["ctrip-hotel-v1", "ctrip-live-rates-v1"]}
+            },
+            "required": ["provider_profile"]
+          }
+        }
+      },
+      "then": {"required": ["candidate_inventory", "candidate_pool"]}
+    }
+  ]
 }

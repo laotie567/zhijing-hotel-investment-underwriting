@@ -34,7 +34,8 @@ python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
    `benchmark_selected` 标杆，**最多 8 家**；不要求所有泛候选都有图片或价格。
 2. 将全量候选放进 `candidate_inventory`。`ctrip-hotel-v1` 仍要求每个选中标杆先写入
    经页面确认的 `ota_property` 映射；`ctrip-live-rates-v1` 可以仅对唯一精确的
-   `opencli ctrip search` 结果自动建立映射。随后用 `ego-browser` 或
+   `opencli ctrip search` 结果、且酒店地址与搜索结果城市一致时自动建立映射。把地图回执
+   的 `spatial_collection` 原样作为 `candidate_pool` 一并传入；随后用 `ego-browser` 或
    `ctrip-live-rates` 分别运行对应 Profile。
 
 `ota_property` 必须包含 `platform`、稳定 `property_id`、详情页 URL、匹配方式和
@@ -62,7 +63,10 @@ python3 scripts/collect_market_evidence.py --preflight --engine ctrip-live-rates
 
 首次配对时，管理员按 Ui.Vision 本机设置完成 MCP Bridge 的 `127.0.0.1` 配对，并保持
 侧边栏开启。采集器为单任务 Worker：临时互斥锁防止两个 Hermes 任务同时操作同一
-浏览器页面；锁在任务退出后删除，不保存项目状态。Ui.Vision 运行仓库内固定的刷新宏，
+浏览器页面；锁在任务退出后删除，记录进程已不存在时才自动回收；只有没有有效 PID 的
+异常锁才按 12 分钟过期回收，不保存项目状态。预检同时检查无副作用的
+`opencli ctrip search --help`，保证自动映射
+插件可用。Ui.Vision 运行仓库内固定的刷新宏，
 OpenCLI 仅执行 `bind`、`network` 与只读 `eval`。若 Ui.Vision 未配对、携程未登录、验证码
 出现或报价条件未回显，返回结构化失败原因，绝不回退到 Playwright、Ego Lite 或列表价。
 
@@ -99,7 +103,8 @@ Playwright 认证上下文或其他显式页面适配器，而不是模拟 Ego �
 - `room_types`、`images`、`pricing`：仅对标杆集核验。
 
 `collection_result.status` 是五类覆盖度的总状态；`competitor_analysis.collection_status`
-只判断 2km 空间候选池。故 OTA 的 P1/售罄/登录门槛可令回执保持 `partial`，但不能抹掉
+与 `spatial_collection.status` 只判断 2km 空间候选池；后者必须与 OTA 请求的
+`candidate_pool` 精确相同。故 OTA 的 P1/售罄/登录门槛可令回执保持 `partial`，但不能抹掉
 已完整的 2km 竞品集合或其已经取得的视觉证据；它只会令 ADR 保持不可用。
 
 图片交付为内嵌 JPEG/PNG/WebP，附来源 URL、采集时间、MIME 与 SHA-256；报价附

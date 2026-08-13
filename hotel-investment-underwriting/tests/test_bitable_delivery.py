@@ -7,8 +7,10 @@ underwriting result without introducing formulas or a second financial model.
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -147,6 +149,48 @@ def competitor_report_input() -> dict:
     }
 
 
+def page_receipt(competitors: dict, report: dict) -> dict:
+    timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    candidates = competitors["candidates"]
+    center = competitors["confirmed_location"]
+    candidate_ids_sha256 = hashlib.sha256(
+        json.dumps(
+            sorted(candidate["provider_place_id"] for candidate in candidates),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "contract_version": "market-evidence-collection/v2",
+        "status": "partial",
+        "collector": {
+            "engine": "ego-browser",
+            "engine_version": "test",
+            "source_profile": "ctrip-hotel-v1",
+            "started_at": timestamp,
+            "finished_at": timestamp,
+            "page_sources": [{"url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1", "status": 200}],
+        },
+        "target_resolution": center,
+        "coverage": {
+            "candidates": {"status": "complete", "observed_count": len(candidates)},
+            "benchmark_set": {"status": "complete", "observed_count": len(candidates)},
+            "room_types": {"status": "complete", "observed_count": len(candidates)},
+            "images": {"status": "complete", "observed_count": len(candidates)},
+            "pricing": {"status": "partial", "observed_count": 0},
+        },
+        "collection_gaps": ["测试回执：严格报价仍待补齐"],
+        "competitor_analysis": competitors,
+        "competitor_report": report,
+        "spatial_collection": {
+            "status": "complete",
+            "source_engine": "playwright",
+            "source_profile": "360-map-v1",
+            "center": center,
+            "candidate_count": len(candidates),
+            "candidate_ids_sha256": candidate_ids_sha256,
+        },
+    }
 class BitableDeliveryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.project_input = json.loads(
@@ -161,10 +205,13 @@ class BitableDeliveryTests(unittest.TestCase):
         )
 
     def _request(self) -> dict:
+        competitors = complete_competitor_input()
+        report = competitor_report_input()
         return {
             "project_input": copy.deepcopy(self.project_input),
-            "competitor_analysis": complete_competitor_input(),
-            "competitor_report": competitor_report_input(),
+            "market_evidence": page_receipt(competitors, report),
+            "competitor_analysis": competitors,
+            "competitor_report": report,
         }
 
     def test_manifest_contains_the_standard_template_and_all_delivery_tables(self) -> None:
@@ -241,6 +288,11 @@ class BitableDeliveryTests(unittest.TestCase):
 
     def test_manifest_maps_current_and_historical_competitor_fields_and_media(self) -> None:
         request = self._request()
+        request["competitor_analysis"]["candidates"][0]["benchmark_selected"] = True
+        request["competitor_analysis"]["candidates"][0]["benchmark_rank"] = 1
+        request["competitor_analysis"]["candidates"][0]["benchmark_selection_reason"] = (
+            "固定标杆排序：有公开房型图；距目标111米"
+        )
         result = run.run(request, defaults=self.defaults)
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)
@@ -250,6 +302,8 @@ class BitableDeliveryTests(unittest.TestCase):
         self.assertEqual("金冠", competitor["美团等级/冠"])
         self.assertEqual(22, competitor["房间数"])
         self.assertEqual(4.8, competitor["平台评分"])
+        self.assertEqual(1, competitor["标杆排序"])
+        self.assertIn("固定标杆排序", competitor["标杆筛选依据"])
         self.assertEqual(3, len(manifest["attachments"]))
         self.assertEqual("竞品报价与视觉证据", manifest["attachments"][0]["table"])
         self.assertIn("data:image/png;base64,", manifest["attachments"][0]["data_uri"])
@@ -322,7 +376,11 @@ class BitableDeliveryTests(unittest.TestCase):
 
     def test_delivery_gate_marks_each_formal_competitor_without_an_image_as_pending(self) -> None:
         request = self._request()
-        request["competitor_report"] = {"candidate_media": []}
+        # The public entrypoint only accepts report facts bound to the same
+        # page receipt; mutate that receipt rather than sending a detached
+        # report payload.
+        request["market_evidence"]["competitor_report"]["candidate_media"] = []
+        request["competitor_report"] = request["market_evidence"]["competitor_report"]
         result = run.run(request, defaults=self.defaults)
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)
@@ -359,6 +417,7 @@ class BitableDeliveryTests(unittest.TestCase):
     def test_partial_competitor_collection_writes_a_visible_collection_gap(self) -> None:
         request = self._request()
         request["competitor_analysis"]["collection_status"] = "partial"
+        request["market_evidence"]["spatial_collection"]["status"] = "partial"
         result = run.run(request, defaults=self.defaults)
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)

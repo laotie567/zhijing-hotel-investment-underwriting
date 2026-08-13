@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Browser-page implementation of market-evidence-collection/v1.
+ * Browser-page implementation of market-evidence-collection/v2.
  *
  * This is intentionally a narrow, versioned 360 Map profile.  It opens every
  * JSON/image URL through Playwright's browser context and returns source URLs,
@@ -9,9 +9,10 @@
  */
 
 import { chromium } from "playwright";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-const CONTRACT_VERSION = "market-evidence-collection/v1";
+const CONTRACT_VERSION = "market-evidence-collection/v2";
 const PROFILE = "360-map-v1";
 const PROVIDER = "360地图";
 const PAGE_SIZE = 30;
@@ -96,6 +97,13 @@ function coverage(status, observedCount, notes) {
   const result = { status, observed_count: observedCount };
   if (notes) result.notes = notes;
   return result;
+}
+
+function candidateIdsSha256(candidates) {
+  const identifiers = candidates
+    .map((candidate) => String(candidate?.provider_place_id || ""))
+    .sort();
+  return createHash("sha256").update(JSON.stringify(identifiers), "utf8").digest("hex");
 }
 
 function baseResult({ request, startedAt, engineVersion, pageSources }) {
@@ -235,11 +243,55 @@ function benchmarkCandidates(candidates, requestedMaximum) {
     .slice(0, maximum);
 }
 
+function benchmarkSelectionReason(candidate) {
+  // Persist the fixed evidence order that led to a costly OTA/visual deep
+  // research slot. It is an explanation of the deterministic selection, not
+  // a quality claim inferred by a model.
+  const parts = [];
+  if (firstRoomPhoto(candidate.item?.detail)) parts.push("有公开房型图");
+  const roomTypes = roomTypeNames(candidate.item?.detail).length;
+  if (roomTypes) parts.push(`披露${roomTypes}个房型`);
+  const rating = Number(candidate.item?.avg_rating);
+  if (Number.isFinite(rating) && rating > 0) parts.push(`评分${rating}`);
+  const reviews = reviewCount(candidate.item);
+  if (reviews) parts.push(`${reviews}条点评`);
+  parts.push(`距目标${Math.round(candidate.distance)}米`);
+  return `固定标杆排序：${parts.join("；")}`;
+}
+
 function candidateProvider(center) {
   // Classification compares a candidate with the confirmed 2km centre by
   // provider identity. `360地图` is only a display label, so reuse the actual
   // centre identity and keep automatic/manual centre confirmation consistent.
   return center.provider;
+}
+
+function hasPrimaryEsportsLodgingIdentity(item) {
+  // A generic hotel whose title merely mentions an esports room is not a
+  // primary-esports hotel. The page must identify the accommodation itself as
+  // 电竞酒店/电竞民宿/电竞客栈 (or the provider's category must do so).
+  const name = compactText(item?.name, 300);
+  const category = compactText(item?.cat_new_name, 120);
+  const detailText = compactText(
+    [item?.detail?.category, item?.detail?.theme, ...(Array.isArray(item?.detail?.themes) ? item.detail.themes : [])]
+      .filter(Boolean)
+      .join(" "),
+    1_000,
+  );
+  return /电竞(?:酒店|民宿|客栈|公寓|旅店)/.test(name)
+    || /电竞(?:酒店|民宿|客栈|住宿)/.test(`${category} ${detailText}`);
+}
+
+function operatingStatusFromListing(item) {
+  // A current POI search result is the minimum operating signal. An explicit
+  // closure marker always wins and is retained as an excluded candidate.
+  const statusText = compactText(
+    [item?.status, item?.business_status, item?.detail?.status, item?.detail?.business_status]
+      .filter(Boolean)
+      .join(" "),
+    500,
+  );
+  return /歇业|停业|关闭|closed/i.test(statusText) ? "closed" : "operating";
 }
 
 function profile(item, detail) {
@@ -328,9 +380,14 @@ async function main() {
         batch: 1,
       })
     );
-    const total = Number.isInteger(firstPage.totalcount) && firstPage.totalcount > 0 ? firstPage.totalcount : 0;
-    const sourceSetTruncated = total > input.search.max_candidates;
-    const pageCount = Math.min(Math.ceil(total / PAGE_SIZE), Math.ceil(input.search.max_candidates / PAGE_SIZE));
+    const hasKnownTotal = Number.isInteger(firstPage.totalcount) && firstPage.totalcount >= 0;
+    const total = hasKnownTotal ? firstPage.totalcount : 0;
+    // Without an explicit total the page cannot prove that pagination ended;
+    // preserve the first-page facts but never call the 2km population complete.
+    const sourceSetTruncated = !hasKnownTotal || total > input.search.max_candidates;
+    const pageCount = hasKnownTotal
+      ? Math.min(Math.ceil(total / PAGE_SIZE), Math.ceil(input.search.max_candidates / PAGE_SIZE))
+      : 1;
     const pages = [firstPage];
     for (let batch = 2; batch <= pageCount; batch += 1) {
       pages.push(
@@ -354,7 +411,7 @@ async function main() {
     const observedAt = now();
     const candidates = [...byId.values()]
       .filter((item) => item.pguid !== center.provider_place_id)
-      .filter((item) => typeof item?.name === "string" && item.name.includes("电竞"))
+      .filter((item) => hasPrimaryEsportsLodgingIdentity(item))
       .filter((item) => ["酒店", "客栈民宿", "住宿服务"].includes(item?.cat_new_name))
       .map((item) => ({
         item,
@@ -368,7 +425,11 @@ async function main() {
       candidates,
       input.search.max_benchmark_candidates,
     );
-    const benchmarkCandidateIds = new Set(selectedBenchmarks.map(({ item }) => item.pguid));
+    const benchmarkMetadata = new Map(selectedBenchmarks.map((candidate, index) => [
+      candidate.item.pguid,
+      { rank: index + 1, reason: benchmarkSelectionReason(candidate) },
+    ]));
+    const benchmarkCandidateIds = new Set(benchmarkMetadata.keys());
     const formalCandidates = candidates.map(({ item }) => ({
       provider: candidateProvider(center),
       provider_place_id: item.pguid,
@@ -378,7 +439,7 @@ async function main() {
       latitude: Number(item.y),
       property_kind: "lodging",
       esports_positioning: "primary",
-      operating_status: "operating",
+      operating_status: operatingStatusFromListing(item),
       source: {
         source_platform: "360地图页面（聚合公开酒店资料）",
         source_url: sourceUrl(item.pguid),
@@ -386,6 +447,10 @@ async function main() {
         confidence: "medium",
       },
       benchmark_selected: benchmarkCandidateIds.has(item.pguid),
+      ...(benchmarkMetadata.has(item.pguid) ? {
+        benchmark_rank: benchmarkMetadata.get(item.pguid).rank,
+        benchmark_selection_reason: benchmarkMetadata.get(item.pguid).reason,
+      } : {}),
       room_offers: [],
       market_profile: profile(item, item.detail),
     }));
@@ -429,7 +494,9 @@ async function main() {
     );
     const required = input.required_evidence;
     const gaps = [];
-    if (sourceSetTruncated) {
+    if (!hasKnownTotal) {
+      gaps.push("页面查询未返回总数；无法证明已穷尽 2km 候选分页");
+    } else if (sourceSetTruncated) {
       gaps.push(`页面查询结果超过 ${input.search.max_candidates} 家上限；2km候选集未完整收集`);
     }
     const benchmarkCandidateCount = benchmarkCandidateIds.size;
@@ -473,6 +540,14 @@ async function main() {
       pricing_context: input.pricing_context,
       candidates: formalCandidates,
     };
+    result.spatial_collection = {
+      status: spatialCollectionComplete ? "complete" : "partial",
+      source_engine: "playwright",
+      source_profile: "360-map-v1",
+      center,
+      candidate_count: formalCandidates.length,
+      candidate_ids_sha256: candidateIdsSha256(formalCandidates),
+    };
     result.competitor_report = {
       title: `${input.target.name}：2km纯电竞竞品页面调研`,
       candidate_media: candidateMedia,
@@ -490,4 +565,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 }
 
-export { benchmarkCandidates, candidateProvider, firstRoomPhoto, roomTypeNames };
+export {
+  benchmarkCandidates,
+  benchmarkSelectionReason,
+  candidateIdsSha256,
+  candidateProvider,
+  firstRoomPhoto,
+  hasPrimaryEsportsLodgingIdentity,
+  roomTypeNames,
+};

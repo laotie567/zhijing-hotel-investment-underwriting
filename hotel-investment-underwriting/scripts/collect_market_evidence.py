@@ -203,7 +203,27 @@ def collect(request: dict[str, Any], *, engine: str, timeout_seconds: int) -> di
                 f"{engine} is not configured; set {environment_key} to its JSON-stdin adapter command"
             )
         response = _run_process(shlex.split(configured), normalized, timeout_seconds)
-    return market_evidence_contract.validate_collection_result(response)
+    result = market_evidence_contract.validate_collection_result(response)
+    collector = result["collector"]
+    if collector["engine"] != engine:
+        raise CollectionExecutionError(
+            f"page collector engine mismatch: requested {engine}, received {collector['engine']}"
+        )
+    if collector["source_profile"] != normalized["search"]["provider_profile"]:
+        raise CollectionExecutionError(
+            "page collector Profile mismatch: requested "
+            f"{normalized['search']['provider_profile']}, received {collector['source_profile']}"
+        )
+    expected_center = normalized["target"].get("center")
+    resolved_center = result.get("target_resolution")
+    if expected_center is not None and resolved_center != expected_center:
+        raise CollectionExecutionError("page collector target center differs from the confirmed request center")
+    if "candidate_pool" in normalized:
+        if result.get("spatial_collection") != normalized["candidate_pool"]:
+            raise CollectionExecutionError(
+                "OTA collector must return the exact completed 2km spatial_collection it received"
+            )
+    return result
 
 
 def _render(result: dict[str, Any], output_format: str) -> str:

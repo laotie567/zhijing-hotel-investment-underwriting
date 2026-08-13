@@ -15,7 +15,7 @@ database. An authorised Feishu host applies the manifest to a standard Base.
 | `年度收入与现金流` | Full annual revenue, public costs, sharing, cash flow and traditional-room comparison schedule. |
 | `情景与敏感性` | Existing scenario and sensitivity outputs. |
 | `房型配置` | Existing room-type mix, workstation count, ADR/RevPAR/OCC and traditional baseline fields. |
-| `2km竞品` | Formal and excluded candidates, distance, source facts and optional market-profile facts. |
+| `2km竞品` | Formal and excluded candidates, distance, source facts, optional market-profile facts, plus deterministic deep-research benchmark rank/reason when selected. |
 | `竞品报价与视觉证据` | Formal-competitor offers, shared pricing context, renovation observations and selected room-image evidence. |
 
 The Base uses values, text, select, attachment and record-link fields only.
@@ -65,6 +65,13 @@ renovation, room count, image quality, facilities, product features, rating,
 review count and surroundings. It is neither a 2km-classification fact nor a
 financial input. Its exact validation rules are in
 `schemas/skill-request.schema.json`.
+
+For the at-most-eight `benchmark_selected` competitors, the map Profile also
+emits `benchmark_rank` and `benchmark_selection_reason`. These fields describe
+the fixed public-evidence ordering (room photo, disclosed room types,
+rating/reviews, distance, provider-ID tie break); they make it possible to
+audit why a property received costly OTA/image research. They do not change
+competitor classification, ADR eligibility or finance.
 
 ## Host apply contract
 

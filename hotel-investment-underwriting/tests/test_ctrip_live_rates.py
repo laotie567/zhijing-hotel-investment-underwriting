@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -20,8 +21,8 @@ import market_evidence_contract  # noqa: E402
 
 
 def request() -> dict:
-    return {
-        "contract_version": "market-evidence-collection/v1",
+    value = {
+        "contract_version": "market-evidence-collection/v2",
         "request_id": "ctrip-live-test",
         "target": {
             "name": "笨酒店",
@@ -72,12 +73,26 @@ def request() -> dict:
             }
         ],
     }
+    identifiers = sorted(
+        item["candidate"]["provider_place_id"] for item in value["candidate_inventory"]
+    )
+    value["candidate_pool"] = {
+        "status": "complete",
+        "source_engine": "playwright",
+        "source_profile": "360-map-v1",
+        "center": value["target"]["center"],
+        "candidate_count": len(identifiers),
+        "candidate_ids_sha256": hashlib.sha256(
+            json.dumps(identifiers, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    }
+    return value
 
 
 def result() -> dict:
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return {
-        "contract_version": "market-evidence-collection/v1",
+        "contract_version": "market-evidence-collection/v2",
         "request_id": "ctrip-live-test",
         "status": "partial",
         "collector": {
@@ -102,11 +117,12 @@ def result() -> dict:
         ],
         "competitor_analysis": {
             "confirmed_location": request()["target"]["center"],
-            "collection_status": "partial",
+            "collection_status": "complete",
             "pricing_context": request()["pricing_context"],
-            "candidates": [],
+            "candidates": [copy.deepcopy(request()["candidate_inventory"][0]["candidate"])],
         },
         "competitor_report": {"candidate_media": []},
+        "spatial_collection": request()["candidate_pool"],
     }
 
 
@@ -179,6 +195,27 @@ console.log(JSON.stringify({observation: observation(match, context, 'https://ho
         self.assertTrue(value["observation"]["adr_eligible"])
         self.assertEqual(2, value["observation"]["workstations"])
 
+    def test_unverified_page_context_never_marks_a_p2_observation_adr_eligible(self) -> None:
+        script = """
+import { networkRates, domRates, matchRates, observation } from './collector/ctrip_live_rates.mjs';
+const network = networkRates({roomName:'双人电竞房 2台电脑',roomId:'room-2',salePrice:328,available:true,cancelPolicy:'免费取消',taxInfo:'含税'}, '/room-list');
+const dom = domRates({room_blocks:[{room_id:'room-2',text:'双人电竞房 2台电脑\\n¥328\\n可订\\n含税\\n免费取消'}]});
+const match = matchRates(network, dom)[0];
+console.log(JSON.stringify(observation(match, {check_in_date:'2026-08-20',nights:1,guests:2,currency:'CNY'}, 'https://hotels.ctrip.com/hotels/detail/?hotelId=1', '2026-08-13T00:00:00Z', false)));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        value = json.loads(completed.stdout)
+
+        self.assertFalse(value["adr_eligible"])
+        self.assertIn("pricing_context_unverified", value["qualification_gaps"])
+
     def test_ota_mapping_requires_the_exact_hotel_name_before_city_suffix(self) -> None:
         script = """
 import { mappingName } from './collector/ctrip_live_rates.mjs';
@@ -199,6 +236,54 @@ console.log(JSON.stringify({
 
         self.assertTrue(value["same"])
         self.assertFalse(value["different"])
+
+    def test_automatic_mapping_requires_a_city_extracted_from_the_target_address(self) -> None:
+        script = """
+import { cityFromAddress } from './collector/ctrip_live_rates.mjs';
+console.log(JSON.stringify({
+  chengdu: cityFromAddress('成都市青羊区万达广场商业楼 2 栋'),
+  missing: cityFromAddress('万达广场商业楼 2 栋')
+}));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        value = json.loads(completed.stdout)
+
+        self.assertEqual("成都", value["chengdu"])
+        self.assertEqual("", value["missing"])
+
+    def test_stale_live_rate_lock_can_be_recovered_but_a_live_pid_cannot(self) -> None:
+        script = """
+import { lockIsStale } from './collector/ctrip_live_rates.mjs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+const directory = mkdtempSync(path.join(os.tmpdir(), 'zhijing-lock-test-'));
+const stale = path.join(directory, 'stale.lock');
+const live = path.join(directory, 'live.lock');
+writeFileSync(stale, JSON.stringify({pid: 99999999, started_at: '2020-01-01T00:00:00.000Z'}));
+writeFileSync(live, JSON.stringify({pid: process.pid, started_at: new Date().toISOString()}));
+console.log(JSON.stringify({stale: lockIsStale(stale), live: lockIsStale(live)}));
+rmSync(directory, {recursive: true, force: true});
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        value = json.loads(completed.stdout)
+
+        self.assertTrue(value["stale"])
+        self.assertFalse(value["live"])
 
     def test_360_benchmark_selection_is_quality_ranked_and_never_exceeds_eight(self) -> None:
         script = """
@@ -231,6 +316,22 @@ console.log(JSON.stringify({ids: selected.map(({item}) => item.pguid), count: se
         self.assertEqual("photo-room-high-rating", value["ids"][0])
         self.assertNotIn("nearest-low-evidence", value["ids"])
 
+        reason_script = """
+import { benchmarkSelectionReason } from './collector/playwright_360_map.mjs';
+const item = {pguid:'evidence', avg_rating:4.8, review_count:120, detail:{room_types:[{name:'双人电竞房', imgs:['https://example.com/a.jpg']} ]}};
+console.log(benchmarkSelectionReason({item, distance:386}));
+"""
+        reason_completed = subprocess.run(
+            ["node", "--input-type=module", "-e", reason_script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn("有公开房型图", reason_completed.stdout)
+        self.assertIn("距目标386米", reason_completed.stdout)
+
         zero_script = """
 import { benchmarkCandidates } from './collector/playwright_360_map.mjs';
 console.log(JSON.stringify(benchmarkCandidates([{item:{pguid:'only', detail:{}}, distance:1}], 0).length));
@@ -260,6 +361,15 @@ console.log(JSON.stringify(candidateProvider({provider:'360-map-v1'})));
         )
 
         self.assertEqual("360-map-v1", json.loads(completed.stdout))
+
+    def test_ego_uses_the_map_pool_proof_not_an_inventory_length_heuristic(self) -> None:
+        source = (ROOT / "collector" / "ego_ctrip.mjs").read_text(encoding="utf-8")
+
+        self.assertIn('request.candidate_pool?.status === "complete"', source)
+        self.assertNotIn(
+            "inventory.length > 0 && inventory.length < request.search.max_candidates",
+            source,
+        )
 
     def test_price_difference_does_not_become_an_adr_offer(self) -> None:
         script = """

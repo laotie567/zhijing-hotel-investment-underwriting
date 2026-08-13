@@ -10,7 +10,7 @@
     },
     "market_evidence": {
       "type": "object",
-      "description": "Validated market-evidence-collection/v1 receipt. The public runner verifies it and requires competitor fields to match its embedded patch exactly."
+      "description": "Validated market-evidence-collection/v2 receipt. The public runner verifies it and requires competitor fields to match its embedded patch exactly."
     },
     "competitor_analysis": {
       "type": "object",
@@ -84,6 +84,8 @@
                 }
               },
               "benchmark_selected": {"type": "boolean"},
+              "benchmark_rank": {"type": "integer", "minimum": 1, "maximum": 8},
+              "benchmark_selection_reason": {"type": "string", "minLength": 1, "maxLength": 500},
               "booking_evidence": {
                 "type": "array",
                 "items": {

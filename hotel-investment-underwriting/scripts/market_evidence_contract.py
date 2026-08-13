@@ -10,6 +10,7 @@ turns an unscoped listing price into an ADR input.
 from __future__ import annotations
 
 from datetime import date, datetime
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any, Mapping
 from urllib.parse import urlparse
 
 
-CONTRACT_VERSION = "market-evidence-collection/v1"
+CONTRACT_VERSION = "market-evidence-collection/v2"
 SUPPORTED_ENGINES = {
     "ctrip-live-rates",
     "ego-browser",
@@ -32,11 +33,19 @@ SUPPORTED_PROVIDER_PROFILES = {
     "ctrip-hotel-v1",
     "ctrip-live-rates-v1",
 }
+_BUNDLED_ENGINE_PROFILES = {
+    "playwright": "360-map-v1",
+    "ego-browser": "ctrip-hotel-v1",
+    "ctrip-live-rates": "ctrip-live-rates-v1",
+}
 _CTRIP_AUTO_MAPPING_PROFILE = "ctrip-live-rates-v1"
 _COVERAGE_STATUSES = {"complete", "partial", "not_collected", "failed"}
 _RESULT_STATUSES = {"complete", "partial", "failed"}
 _BOOKING_PLATFORMS = {"携程"}
 MAX_BENCHMARK_CANDIDATES = 8
+# This is a transport/validation safety limit for a *complete* 2km map pool,
+# not the deep-research limit.  The latter remains eight selected benchmarks.
+MAX_SPATIAL_CANDIDATES = 1_000
 
 
 class MarketEvidenceContractError(ValueError):
@@ -156,8 +165,11 @@ def _validate_candidate_inventory(
 
     if value is None:
         return []
-    if not isinstance(value, list) or len(value) > 200:
-        raise MarketEvidenceContractError("collection_request.candidate_inventory must be an array of at most 200 items")
+    if not isinstance(value, list) or len(value) > MAX_SPATIAL_CANDIDATES:
+        raise MarketEvidenceContractError(
+            "collection_request.candidate_inventory must be an array of at most "
+            f"{MAX_SPATIAL_CANDIDATES} items"
+        )
     normalized: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     selected_count = 0
@@ -225,6 +237,83 @@ def _validate_candidate_inventory(
     return normalized
 
 
+def _candidate_ids_sha256(candidates: list[Mapping[str, Any]]) -> str:
+    """Fingerprint the exact provider-place population passed between profiles."""
+
+    identifiers = sorted(
+        _require_text(
+            candidate.get("provider_place_id"),
+            "candidate.provider_place_id",
+            maximum=200,
+        )
+        for candidate in candidates
+    )
+    if len(set(identifiers)) != len(identifiers):
+        raise MarketEvidenceContractError("candidate.provider_place_id values must be unique")
+    encoded = json.dumps(
+        identifiers, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validate_spatial_pool(
+    value: Any,
+    *,
+    candidates: list[Mapping[str, Any]],
+    expected_center: Mapping[str, Any] | None,
+    path: str,
+    require_complete: bool,
+) -> dict[str, Any]:
+    """Validate the durable proof that an OTA profile received one full 2km pool."""
+
+    raw = _require_mapping(value, path)
+    _reject_unknown(
+        raw,
+        {
+            "status",
+            "source_engine",
+            "source_profile",
+            "center",
+            "candidate_count",
+            "candidate_ids_sha256",
+        },
+        path,
+    )
+    status = raw.get("status")
+    if status not in {"complete", "partial"}:
+        raise MarketEvidenceContractError(f"{path}.status must be complete or partial")
+    if require_complete and status != "complete":
+        raise MarketEvidenceContractError(f"{path}.status must be complete before OTA benchmark collection")
+    source_engine = _require_text(raw.get("source_engine"), f"{path}.source_engine", maximum=100)
+    if source_engine not in SUPPORTED_ENGINES:
+        raise MarketEvidenceContractError(f"{path}.source_engine is unsupported")
+    if raw.get("source_profile") != "360-map-v1":
+        raise MarketEvidenceContractError(f"{path}.source_profile must equal '360-map-v1'")
+    center = _validate_center(raw.get("center"), f"{path}.center")
+    if expected_center is not None and center != dict(expected_center):
+        raise MarketEvidenceContractError(f"{path}.center must match the request/receipt target center")
+    candidate_count = _require_integer(
+        raw.get("candidate_count"), f"{path}.candidate_count", 0, MAX_SPATIAL_CANDIDATES
+    )
+    if candidate_count != len(candidates):
+        raise MarketEvidenceContractError(f"{path}.candidate_count must match candidate_inventory")
+    digest = raw.get("candidate_ids_sha256")
+    if not isinstance(digest, str) or len(digest) != 64 or any(
+        character not in "0123456789abcdef" for character in digest
+    ):
+        raise MarketEvidenceContractError(f"{path}.candidate_ids_sha256 must be lowercase SHA-256")
+    if digest != _candidate_ids_sha256(candidates):
+        raise MarketEvidenceContractError(f"{path}.candidate_ids_sha256 does not match candidate_inventory")
+    return {
+        "status": status,
+        "source_engine": source_engine,
+        "source_profile": "360-map-v1",
+        "center": center,
+        "candidate_count": candidate_count,
+        "candidate_ids_sha256": digest,
+    }
+
+
 def validate_collection_request(value: Any) -> dict[str, Any]:
     """Validate a host request before it reaches an external page collector."""
 
@@ -239,6 +328,7 @@ def validate_collection_request(value: Any) -> dict[str, Any]:
             "pricing_context",
             "required_evidence",
             "candidate_inventory",
+            "candidate_pool",
         },
         "collection_request",
     )
@@ -284,7 +374,10 @@ def validate_collection_request(value: Any) -> dict[str, Any]:
             search.get("radius_meters"), "collection_request.search.radius_meters", 1, 2_000
         ),
         "max_candidates": _require_integer(
-            search.get("max_candidates", 200), "collection_request.search.max_candidates", 1, 200
+            search.get("max_candidates", MAX_SPATIAL_CANDIDATES),
+            "collection_request.search.max_candidates",
+            1,
+            MAX_SPATIAL_CANDIDATES,
         ),
         "max_benchmark_candidates": _require_integer(
             search.get("max_benchmark_candidates", 8),
@@ -340,19 +433,41 @@ def validate_collection_request(value: Any) -> dict[str, Any]:
     }
     if any(not isinstance(required.get(field, True), bool) for field in normalized_required):
         raise MarketEvidenceContractError("collection_request.required_evidence values must be boolean")
+    inventory = _validate_candidate_inventory(
+        raw.get("candidate_inventory"),
+        allow_automatic_ota_mapping=(
+            normalized_search["provider_profile"] == _CTRIP_AUTO_MAPPING_PROFILE
+        ),
+    )
     normalized: dict[str, Any] = {
         "contract_version": CONTRACT_VERSION,
         "target": normalized_target,
         "search": normalized_search,
         "pricing_context": normalized_context,
         "required_evidence": normalized_required,
-        "candidate_inventory": _validate_candidate_inventory(
-            raw.get("candidate_inventory"),
-            allow_automatic_ota_mapping=(
-                normalized_search["provider_profile"] == _CTRIP_AUTO_MAPPING_PROFILE
-            ),
-        ),
+        "candidate_inventory": inventory,
     }
+    is_ota_profile = normalized_search["provider_profile"] in {
+        "ctrip-hotel-v1",
+        "ctrip-live-rates-v1",
+    }
+    raw_pool = raw.get("candidate_pool")
+    if is_ota_profile:
+        if not inventory:
+            raise MarketEvidenceContractError(
+                "OTA benchmark collection requires a complete 2km candidate_inventory"
+            )
+        normalized["candidate_pool"] = _validate_spatial_pool(
+            raw_pool,
+            candidates=[item["candidate"] for item in inventory],
+            expected_center=normalized_target.get("center"),
+            path="collection_request.candidate_pool",
+            require_complete=True,
+        )
+    elif raw_pool is not None:
+        raise MarketEvidenceContractError(
+            "collection_request.candidate_pool is only valid for OTA benchmark profiles"
+        )
     if "request_id" in raw:
         normalized["request_id"] = _require_text(raw["request_id"], "collection_request.request_id", maximum=200)
     return normalized
@@ -427,6 +542,7 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
             "collection_issues",
             "competitor_analysis",
             "competitor_report",
+            "spatial_collection",
         },
         "collection_result",
     )
@@ -460,6 +576,11 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
             collector.get("finished_at"), "collection_result.collector.finished_at"
         ),
     }
+    expected_profile = _BUNDLED_ENGINE_PROFILES.get(engine)
+    if expected_profile is not None and normalized_collector["source_profile"] != expected_profile:
+        raise MarketEvidenceContractError(
+            f"collection_result.collector.source_profile must equal {expected_profile!r} for {engine}"
+        )
     page_sources = collector.get("page_sources", [])
     if not isinstance(page_sources, list) or len(page_sources) > 500:
         raise MarketEvidenceContractError("collection_result.collector.page_sources is invalid")
@@ -507,6 +628,57 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
         raise MarketEvidenceContractError("complete collection requires complete coverage in every dimension")
     if raw["status"] == "complete" and analysis.get("collection_status") != "complete":
         raise MarketEvidenceContractError("complete collection requires competitor_analysis.collection_status=complete")
+    analysis_status = analysis.get("collection_status")
+    if analysis_status not in {"complete", "partial"}:
+        raise MarketEvidenceContractError("collection_result.competitor_analysis.collection_status is invalid")
+    analysis_candidates = analysis.get("candidates")
+    if not isinstance(analysis_candidates, list) or any(
+        not isinstance(item, Mapping) for item in analysis_candidates
+    ):
+        raise MarketEvidenceContractError("collection_result.competitor_analysis.candidates must be an object array")
+    analysis_center = analysis.get("confirmed_location")
+    normalized_analysis_center = (
+        _validate_center(
+            analysis_center, "collection_result.competitor_analysis.confirmed_location"
+        )
+        if analysis_center is not None
+        else None
+    )
+    if normalized_target is not None and normalized_analysis_center != normalized_target:
+        raise MarketEvidenceContractError(
+            "collection_result competitor_analysis center must match target_resolution"
+        )
+    raw_spatial = raw.get("spatial_collection")
+    if analysis_status == "complete":
+        if normalized_target is None or normalized_analysis_center is None:
+            raise MarketEvidenceContractError(
+                "complete spatial collection requires matching target_resolution and confirmed_location"
+            )
+        if normalized_coverage["candidates"]["status"] != "complete":
+            raise MarketEvidenceContractError(
+                "complete spatial collection requires complete candidate coverage"
+            )
+        if raw_spatial is None:
+            raise MarketEvidenceContractError(
+                "complete competitor_analysis requires spatial_collection proof"
+            )
+    normalized_spatial = None
+    if raw_spatial is not None:
+        normalized_spatial = _validate_spatial_pool(
+            raw_spatial,
+            candidates=[dict(item) for item in analysis_candidates],
+            expected_center=normalized_analysis_center or normalized_target,
+            path="collection_result.spatial_collection",
+            require_complete=analysis_status == "complete",
+        )
+        if normalized_spatial["status"] != analysis_status:
+            raise MarketEvidenceContractError(
+                "collection_result spatial_collection.status must match competitor_analysis.collection_status"
+            )
+        if normalized_coverage["candidates"]["observed_count"] != normalized_spatial["candidate_count"]:
+            raise MarketEvidenceContractError(
+                "collection_result candidate coverage count must match spatial_collection"
+            )
     normalized: dict[str, Any] = {
         "contract_version": CONTRACT_VERSION,
         "status": raw["status"],
@@ -518,6 +690,8 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
         "competitor_analysis": dict(analysis),
         "competitor_report": dict(report),
     }
+    if normalized_spatial is not None:
+        normalized["spatial_collection"] = normalized_spatial
     if "request_id" in raw:
         normalized["request_id"] = _require_text(raw["request_id"], "collection_result.request_id", maximum=200)
     return normalized

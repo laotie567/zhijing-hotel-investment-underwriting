@@ -1,6 +1,6 @@
 # 智竞未来电竞酒店投测 Skill
 
-当前开发版本：`0.13.0`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统或项目数据库。它包含一个无界面的、可替换引擎的页面市场证据采集工具。
+当前开发版本：`1.0.0`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统或项目数据库。它包含一个无界面的、可替换引擎的页面市场证据采集工具。
 
 它做三件彼此分离的事：
 
@@ -27,11 +27,11 @@ flowchart LR
 ## 核心规则
 
 - 只接受确认的 GCJ-02 中心点和同坐标系候选点；Skill 自行计算 0–2,000 米 Haversine 距离。
-- 页面证据采集器必须先完成全量 2km 候选，再对明确价格/视觉标杆采集房型、图片和报价；回执标明所用引擎、Profile、每个页面来源 URL/HTTP 状态、采集时间和五项覆盖度。引擎不可用或页面结构变更时必须显式失败/待补，不能以模型臆测补齐。
+- 页面证据采集器必须先完成全量 2km 候选，再对明确价格/视觉标杆采集房型、图片和报价；地图到 OTA 的候选池以中心、引擎/Profile、数量和 provider-place-ID 指纹严格绑定。回执标明所用引擎、Profile、每个页面来源 URL/HTTP 状态、采集时间和五项覆盖度。引擎不可用或页面结构变更时必须显式失败/待补，不能以模型臆测补齐。
 - 正式竞品必须是营业中的主营电竞住宿，候选与中心点使用同一地图 `provider`，并有完整来源记录。
 - 仅在采集完整、同一 `pricing_context`（入住日期、晚数、人数、CNY）下，同机位至少有三家独立的中/高置信度正式竞品时，才输出按 10 元取整的中位数 ADR 参考；低置信度来源仍展示，但不计入 ADR 样本。
 - 竞品建议不会自动写入财务输入；由分析人员显式选择收入假设。
-- 竞品证据不完整时，Skill 输出和嵌套财务结果的 `conclusion_scope` 固定为 `pre_evaluation_only`，不构成完整的竞品结论。
+- 只有点位或全量 2km **空间**证据不完整时，Skill 输出和嵌套财务结果的 `conclusion_scope` 才为 `pre_evaluation_only`。OTA 的图片/价格回执可以是 `partial`，但已完成的空间竞品结论仍可审阅；对应机位 ADR 保持为空，交付清单保留待补项。
 - 财务结果同时给出历史投资表口径的 `static_payback_months`（一次性初投 ÷ 首年平均月经营净现金）和折现持续回本的 `discounted_payback_months`；两者均附向上取整的整月值，不能互相替代。
 - `scripts/collect_market_evidence.py` 是唯一页面采集入口，`scripts/run.py` 是唯一测算入口；`calculate.py` 仅供 Skill 内部调用。
 - 部署到 Mac Mini/Hermes 后先执行 `collect_market_evidence.py --preflight --all-engines`。Ego Lite、Ui.Vision+OpenCLI 或 Kimi WebBridge 未安装、扩展未连接或适配器未配置时，工具给出可展示的安装动作，不会降级或虚构价格。

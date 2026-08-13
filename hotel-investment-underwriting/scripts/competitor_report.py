@@ -359,6 +359,11 @@ def _candidate_card(candidate: Mapping[str, Any]) -> str:
     detail_rows = [
         ["地图实体", _text(candidate.get("provider_place_id") or "—")],
         ["直线距离", f"{_number(candidate.get('distance_meters'))} 米"],
+        *(
+            [["深调标杆", f"第 {_number(candidate.get('benchmark_rank'))} 位 · {_text(candidate.get('benchmark_selection_reason') or '固定证据排序')}"]]
+            if candidate.get("benchmark_selected") is True
+            else []
+        ),
         ["来源", source_details],
         ["来源链接", _url(source.get("source_url"))],
     ]

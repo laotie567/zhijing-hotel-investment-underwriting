@@ -10,15 +10,15 @@
 财务输入完整，验收使用 8 间单机大床 + 9 间双机双床、合计 26 机位的**基准示例假设**；
 它仅验证技术链路，不能代替真实合同、成本、房型或投资决策。
 
-2026-08-13 的一次真实页面验收结果如下。地图候选的实时数量可变，因此这里只记录
-当次回执，不将其作为永久测试常量：
+页面候选的实时数量可变。验收记录保留在宿主的受控运行目录，不提交到 Git；文档只
+规定需要核对的回执关系，避免将某次页面数量误写为长期阈值：
 
 | 阶段 | 选定引擎/Profile | 当次结果 | 结论 |
 |---|---|---|---|
-| 2km 候选 | Playwright / `360-map-v1` | 确认 GCJ-02 中心点，88 家候选，公开房型/图片覆盖完整 | 可追溯的全量候选池 |
-| OTA 标杆 | Ego Lite / `ctrip-hotel-v1` | 将 88 家候选作为 `candidate_inventory` 传入；1 家已有显式携程房源 ID 映射的标杆取得 2 张图片、URL、时间与 SHA-256 | 图片可进入 HTML/Base 附件 |
-| 同条件价格 | Ego Lite / `ctrip-hotel-v1` | OTA 页面显示“登录看低价” | `pricing=partial`，不得形成 ADR |
-| 投测和交付 | `run.py` | 17 间、26 机位；智竞静态回本 17.9 月/向上取整 18 月，动态回本向上取整 19 月 | 仅 `pre_evaluation_only` |
+| 2km 候选 | Playwright / `360-map-v1` | 确认 GCJ-02 中心点、全量候选、`spatial_collection`（中心/数量/ID 指纹） | 可追溯的完整空间候选池 |
+| OTA 标杆 | Ego Lite / `ctrip-hotel-v1` 或 Ui.Vision+OpenCLI / `ctrip-live-rates-v1` | 将**全量**候选作为 `candidate_inventory`，并原样传入 `candidate_pool`；仅最多 8 个已选标杆采集房型/图片/报价 | CLI 验证回传池、引擎/Profile与中心一致；图片可进入 HTML/Base 附件 |
+| 同条件价格 | OTA Profile | 登录、验证码、售罄或页面未回显日期/人数 | 回执可为 `partial`；P1/P2 观察保留，`pricing_context_unverified` 或其他资格缺口不得形成 ADR |
+| 投测和交付 | `run.py` | 基准输入的财务机械、HTML、Bitable manifest | 空间池完整时为 `ready_for_review`；缺价格/图片会保留待补项和空 ADR，不自动改写财务 |
 
 ## 在 Mac Mini 上复现
 
@@ -37,9 +37,10 @@
    候选的同源 GCJ-02 坐标/来源。
 
 3. 从该 JSON 传递完整 `competitor_analysis.candidates` 作为 OTA 请求的
-   `candidate_inventory`。仅将人工或已授权适配器确认过的地图实体标成
-   `benchmark_selected`，并为每一个标杆添加稳定 `ota_property.property_id`、URL、
-   匹配方式及时间。以 `--engine ego-browser` 执行 `ctrip-hotel-v1`。
+   `candidate_inventory`，并把原回执 `spatial_collection` 原样填入 `candidate_pool`。
+   仅将人工或已授权适配器确认过的地图实体标成 `benchmark_selected`（最多 8 家）；
+   对 `ctrip-hotel-v1`，为每一个标杆添加稳定 `ota_property.property_id`、URL、匹配方式
+   及时间；`ctrip-live-rates-v1` 只允许名称与地址城市均唯一精确的自动映射。以相应引擎运行。
 
 4. 将 OTA 采集结果作为 `market_evidence` 与项目财务输入组装，并分别运行：
 
@@ -61,11 +62,13 @@
 - **通过页面技术链路**：每段 JSON 都有匹配的 `collector.engine`、Profile、真实页面
   URL/HTTP 状态和带时区时间；所有图片都有 URL、MIME、SHA-256；HTML 可在无 Skill
   目录的设备上打开。
-- **通过完整市场结论**：全量候选和标杆集的房型、图片、价格均为 `complete`，且同机位
+- **通过空间市场结论**：全量候选完成，且 OTA 回执原样返回匹配的 `spatial_collection`；
+  此时可审阅正式竞品集合。
+- **通过 ADR 参考**：在空间结论基础上，标杆集的同条件价格满足严格 P2 资格，且同机位
   有至少三家独立中/高置信度正式竞品的同条件可订报价。
-- **价格被登录、验证码、售罄或页面条件缺失阻断**：保留已取得的候选/图片，输出
-  `partial` 和 `pre_evaluation_only`。管理员在 Ego Lite 完成正常登录后重跑；不得将
-  列表价、不同日期价或模型猜测写入 ADR。
+- **价格被登录、验证码、售罄或页面条件缺失阻断**：保留已取得的候选/图片，采集回执
+  为 `partial`，ADR 保持不可用；若空间池完整，仍为 `ready_for_review` 并在交付物中列出
+  缺口。管理员完成正常登录后重跑；不得将列表价、不同日期价或模型猜测写入 ADR。
 
 ## 交付物与留存
 

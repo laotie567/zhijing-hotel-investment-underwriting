@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -21,7 +22,7 @@ import run  # noqa: E402
 
 def request() -> dict:
     return {
-        "contract_version": "market-evidence-collection/v1",
+        "contract_version": "market-evidence-collection/v2",
         "request_id": "test-001",
         "target": {
             "name": "笨酒店",
@@ -83,10 +84,30 @@ def selected_inventory() -> list[dict]:
     ]
 
 
+def spatial_pool(inventory: list[dict], center: dict, *, status: str = "complete") -> dict:
+    identifiers = sorted(item["candidate"]["provider_place_id"] for item in inventory)
+    return {
+        "status": status,
+        "source_engine": "playwright",
+        "source_profile": "360-map-v1",
+        "center": center,
+        "candidate_count": len(inventory),
+        "candidate_ids_sha256": hashlib.sha256(
+            json.dumps(identifiers, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
 def result(*, status: str = "partial") -> dict:
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    inventory = []
+    for index in range(3):
+        entry = copy.deepcopy(selected_inventory()[0])
+        entry["candidate"]["provider_place_id"] = f"candidate-{index:03d}"
+        inventory.append(entry)
+    candidates = [entry["candidate"] for entry in inventory]
     return {
-        "contract_version": "market-evidence-collection/v1",
+        "contract_version": "market-evidence-collection/v2",
         "request_id": "test-001",
         "status": status,
         "collector": {
@@ -112,25 +133,44 @@ def result(*, status: str = "partial") -> dict:
             "confirmed_location": request()["target"]["center"],
             "collection_status": "partial",
             "pricing_context": request()["pricing_context"],
-            "candidates": [],
+            "candidates": candidates,
         },
         "competitor_report": {"title": "测试页面调研", "candidate_media": []},
     }
 
 
 class MarketEvidenceContractTests(unittest.TestCase):
+    def test_v1_receipts_fail_closed_after_the_v2_contract_migration(self) -> None:
+        legacy_request = request()
+        legacy_request["contract_version"] = "market-evidence-collection/v1"
+        with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "v2"):
+            market_evidence_contract.validate_collection_request(legacy_request)
+
+        legacy_result = result()
+        legacy_result["contract_version"] = "market-evidence-collection/v1"
+        with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "v2"):
+            market_evidence_contract.validate_collection_result(legacy_result)
+
     def test_request_defaults_and_2km_boundary_are_normalized(self) -> None:
         normalized = market_evidence_contract.validate_collection_request(request())
 
         self.assertEqual(2_000, normalized["search"]["radius_meters"])
-        self.assertEqual(200, normalized["search"]["max_candidates"])
+        self.assertEqual(1_000, normalized["search"]["max_candidates"])
         self.assertEqual("CNY", normalized["pricing_context"]["currency"])
         self.assertEqual([], normalized["candidate_inventory"])
+
+        too_many = request()
+        too_many["search"]["max_candidates"] = 1_001
+        with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "1 and 1000"):
+            market_evidence_contract.validate_collection_request(too_many)
 
     def test_selected_price_visual_benchmark_requires_explicit_ota_identity_bridge(self) -> None:
         value = request()
         value["search"]["provider_profile"] = "ctrip-hotel-v1"
         value["candidate_inventory"] = selected_inventory()
+        value["candidate_pool"] = spatial_pool(
+            value["candidate_inventory"], value["target"]["center"]
+        )
 
         normalized = market_evidence_contract.validate_collection_request(value)
 
@@ -154,6 +194,7 @@ class MarketEvidenceContractTests(unittest.TestCase):
             entry["ota_property"]["property_id"] = f"property-{index:03d}"
             inventory.append(entry)
         invalid["candidate_inventory"] = inventory
+        invalid["candidate_pool"] = spatial_pool(inventory, invalid["target"]["center"])
         with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "at most 8"):
             market_evidence_contract.validate_collection_request(invalid)
 
@@ -168,11 +209,47 @@ class MarketEvidenceContractTests(unittest.TestCase):
     def test_partial_ota_receipt_may_preserve_completed_spatial_collection(self) -> None:
         value = result()
         value["competitor_analysis"]["collection_status"] = "complete"
+        value["spatial_collection"] = spatial_pool(
+            [{"candidate": candidate} for candidate in value["competitor_analysis"]["candidates"]],
+            value["competitor_analysis"]["confirmed_location"],
+        )
 
         normalized = market_evidence_contract.validate_collection_result(value)
 
         self.assertEqual("partial", normalized["status"])
         self.assertEqual("complete", normalized["competitor_analysis"]["collection_status"])
+
+    def test_partial_receipt_cannot_claim_a_complete_spatial_pool_without_one(self) -> None:
+        value = result()
+        value["competitor_analysis"]["collection_status"] = "complete"
+        value["competitor_analysis"]["candidates"] = []
+
+        with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "spatial"):
+            market_evidence_contract.validate_collection_result(value)
+
+    def test_complete_spatial_receipt_requires_a_confirmed_target_and_unique_provider_ids(self) -> None:
+        missing_center = result()
+        missing_center["competitor_analysis"]["collection_status"] = "complete"
+        missing_center["target_resolution"] = None
+        missing_center["competitor_analysis"]["confirmed_location"] = None
+        missing_center["spatial_collection"] = spatial_pool(
+            [{"candidate": candidate} for candidate in missing_center["competitor_analysis"]["candidates"]],
+            request()["target"]["center"],
+        )
+        with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "target_resolution"):
+            market_evidence_contract.validate_collection_result(missing_center)
+
+        duplicate_ids = result()
+        duplicate_ids["competitor_analysis"]["collection_status"] = "complete"
+        duplicate_ids["competitor_analysis"]["candidates"][1]["provider_place_id"] = (
+            duplicate_ids["competitor_analysis"]["candidates"][0]["provider_place_id"]
+        )
+        duplicate_ids["spatial_collection"] = spatial_pool(
+            [{"candidate": candidate} for candidate in duplicate_ids["competitor_analysis"]["candidates"]],
+            duplicate_ids["competitor_analysis"]["confirmed_location"],
+        )
+        with self.assertRaisesRegex(market_evidence_contract.MarketEvidenceContractError, "unique"):
+            market_evidence_contract.validate_collection_result(duplicate_ids)
 
     def test_complete_result_rejects_uncollected_price_or_partial_images(self) -> None:
         invalid = result(status="complete")
@@ -194,6 +271,16 @@ class MarketEvidenceContractTests(unittest.TestCase):
         ):
             market_evidence_contract.validate_collection_result(invalid)
 
+    def test_bundled_engine_cannot_claim_another_profile_in_a_standalone_receipt(self) -> None:
+        invalid = result()
+        invalid["collector"]["engine"] = "ctrip-live-rates"
+
+        with self.assertRaisesRegex(
+            market_evidence_contract.MarketEvidenceContractError,
+            "ctrip-live-rates-v1",
+        ):
+            market_evidence_contract.validate_collection_result(invalid)
+
     def test_playwright_is_explicit_default_and_receipt_is_validated(self) -> None:
         captured: dict[str, object] = {}
 
@@ -211,7 +298,24 @@ class MarketEvidenceContractTests(unittest.TestCase):
         self.assertEqual("playwright", collected["collector"]["engine"])
         self.assertEqual("node", captured["command"][0])
         self.assertEqual(120, captured["timeout"])
-        self.assertEqual("market-evidence-collection/v1", captured["payload"]["contract_version"])
+        self.assertEqual("market-evidence-collection/v2", captured["payload"]["contract_version"])
+
+    def test_collector_rejects_a_center_different_from_the_confirmed_request(self) -> None:
+        payload = request()
+        received = result()
+        different_center = copy.deepcopy(payload["target"]["center"])
+        different_center["longitude"] = 104.0
+        received["target_resolution"] = different_center
+        received["competitor_analysis"]["confirmed_location"] = different_center
+
+        with patch.object(collect_market_evidence, "_run_process", return_value=received), patch.object(
+            collect_market_evidence.market_evidence_runtime, "require_ready"
+        ):
+            with self.assertRaisesRegex(
+                collect_market_evidence.CollectionExecutionError,
+                "target center differs",
+            ):
+                collect_market_evidence.collect(payload, engine="playwright", timeout_seconds=120)
 
     def test_missing_optional_engine_never_silently_falls_back_to_playwright(self) -> None:
         with patch.dict("os.environ", {}, clear=True), patch.object(

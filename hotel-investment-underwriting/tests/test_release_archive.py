@@ -79,6 +79,28 @@ class ReleaseArchiveTests(unittest.TestCase):
         self.assertTrue(names)
         self.assertEqual(PUBLISHED_FILES, names, names)
 
+    def test_root_archive_policy_excludes_client_office_and_image_files(self) -> None:
+        """Guard against a future force-add leaking customer material in a root archive."""
+
+        probe_paths = (
+            "customer-input.xlsx",
+            "hotel-investment-underwriting/customer-input.docx",
+            "hotel-investment-underwriting/collector/page-capture.png",
+        )
+        attributes = subprocess.run(
+            # Read the same staged attributes as the tree used by the archive
+            # test above; a local unstaged .gitattributes must not give a false
+            # green release check.
+            ["git", "check-attr", "--cached", "export-ignore", "--", *probe_paths],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+
+        self.assertEqual(len(probe_paths), len(attributes))
+        self.assertTrue(all(line.endswith(": set") for line in attributes), attributes)
+
 
 if __name__ == "__main__":
     unittest.main()
