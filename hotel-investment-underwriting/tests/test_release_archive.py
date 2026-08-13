@@ -21,6 +21,7 @@ PUBLISHED_FILES = {
     f"{SKILL_PREFIX}agents/openai.yaml",
     f"{SKILL_PREFIX}references",
     f"{SKILL_PREFIX}references/benchmark-defaults.json",
+    f"{SKILL_PREFIX}references/bitable-delivery.md",
     f"{SKILL_PREFIX}references/decision-policy.md",
     f"{SKILL_PREFIX}references/input-schema.md",
     f"{SKILL_PREFIX}references/methodology.md",
@@ -32,6 +33,7 @@ PUBLISHED_FILES = {
     f"{SKILL_PREFIX}scripts/input_contract.py",
     f"{SKILL_PREFIX}scripts/competitor_analysis.py",
     f"{SKILL_PREFIX}scripts/competitor_report.py",
+    f"{SKILL_PREFIX}scripts/bitable_delivery.py",
     f"{SKILL_PREFIX}scripts/calculate.py",
 }
 

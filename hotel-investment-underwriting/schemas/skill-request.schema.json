@@ -70,6 +70,21 @@
                     "nightly_price": {"type": "number", "exclusiveMinimum": 0}
                   }
                 }
+              },
+              "market_profile": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "meituan_badge": {"type": "string", "maxLength": 100},
+                  "opening_or_renovation": {"type": "string", "maxLength": 300},
+                  "room_count": {"type": "integer", "minimum": 1},
+                  "image_quality": {"type": "string", "maxLength": 500},
+                  "facilities": {"type": "string", "maxLength": 2000},
+                  "features": {"type": "string", "maxLength": 2000},
+                  "rating": {"type": "number", "minimum": 0, "maximum": 5},
+                  "review_count": {"type": "integer", "minimum": 0},
+                  "surroundings": {"type": "string", "maxLength": 2000}
+                }
               }
             }
           }

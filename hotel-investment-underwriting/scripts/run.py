@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 from typing import Any, Mapping
 
+import bitable_delivery
 import calculate
 import competitor_analysis
 import competitor_report
@@ -187,17 +188,30 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run one competitor-aware hotel underwriting Skill")
     parser.add_argument("--input", required=True, help="Skill request JSON path, or - for stdin")
     parser.add_argument("--defaults", help="Optional financial benchmark-defaults JSON path")
-    parser.add_argument("--format", choices=("json", "feishu", "html"), default="json")
+    parser.add_argument(
+        "--format", choices=("json", "feishu", "html", "bitable"), default="json"
+    )
     args = parser.parse_args()
     try:
         request = _load_json(args.input)
-        result = run(request, _load_json(args.defaults) if args.defaults else None)
+        defaults = _load_json(args.defaults) if args.defaults else None
+        result = run(request, defaults)
         rendered_html = (
             competitor_report.render_competitor_report(result, request)
             if args.format == "html"
             else None
         )
+        rendered_bitable = (
+            bitable_delivery.build_manifest(
+                result,
+                request,
+                defaults,
+            )
+            if args.format == "bitable"
+            else None
+        )
     except (
+        bitable_delivery.BitableDeliveryError,
         SkillRunError,
         input_contract.InputContractError,
         competitor_analysis.CompetitorInputError,
@@ -212,6 +226,8 @@ def main() -> int:
         print(result["feishu_summary"])
     elif args.format == "html":
         print(rendered_html)
+    elif args.format == "bitable":
+        print(json.dumps(rendered_bitable, ensure_ascii=False, indent=2, allow_nan=False))
     else:
         print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
     return 0

@@ -11,7 +11,8 @@
 | `competitor_analysis.candidates` | 电竞竞品候选与报价观察 | 已授权地图/证据采集或人工核验 |
 | `competitor_analysis.collection_status` | 候选集是否已完成定义内的采集 | 执行采集的宿主 |
 | `competitor_analysis.pricing_context` | 同批报价的入住日期、晚数、人数和币种 | 已授权报价采集或人工核验 |
-| `competitor_report` | 可选的竞品装修观察、图片和报告标题；用于 HTML 的视觉竞品对标展示 | 已授权公开资料或人工核验 |
+| `competitor_analysis.candidates[].market_profile` | 可选历史市场调研事实：等级、装修、房量、设施、评分等；仅用于交付展示 | 已授权公开资料或人工核验 |
+| `competitor_report` | 可选的竞品装修观察、图片和报告标题；用于 HTML 和 Bitable 的视觉对标展示 | 已授权公开资料或人工核验 |
 
 金额单位为人民币元；比例使用小数；ADR 为元/已售房夜；距离由 Skill 计算为米。
 
@@ -28,12 +29,12 @@ Skill 使用未舍入 Haversine 距离判断 `0 <= distance_meters <= 2000`。�
 
 候选的 `provider_place_id` 在一次请求中必须唯一。`low` 置信度的来源仍保留在竞品清单中，但不计入 ADR；每个机位须有至少三家独立的 `medium` 或 `high` 置信度物业才可给出建议 ADR。`observed_at` 由宿主的证据采集有效期策略审核；过期报价必须重新采集，Skill 不擅自设定业务时效阈值。
 
-## 可选 HTML 展示证据
+## 可选视觉展示证据
 
 `competitor_report.candidate_media[]` 必须通过已被结果确认的正式
 `pure_esports_hotel` 的 `provider_place_id` 绑定。每条可包含一段有 `observation_source_url` 的装修观察，以及最多 4 张带 `caption` 和 `source_url` 的 JPEG、PNG 或 WebP 图片。图片必须使用 `data:image/...;base64,...`；HTML 渲染器拒绝远程图片地址、SVG、未知字段和不匹配的图片字节。报告会在“视觉竞品对标”区把每条视觉证据与该竞品的距离、房型、机位和同条件报价集中呈现。这样 HTML 本身没有外部图片、脚本或样式依赖，来源 URL 只作为可点击的追溯记录。
 
-展示证据只辅助人工比较装修与产品状态，不进入正式竞品分类、ADR 样本或财务模型，也不自动写入调价结论。若 `provider_place_id` 不在本次正式竞品集合内，HTML 输出快速失败，避免生成孤立、错绑或未展示的图片；JSON 和 Feishu 的核心投测仍可独立运行。
+展示证据只辅助人工比较装修与产品状态，不进入正式竞品分类、ADR 样本或财务模型，也不自动写入调价结论。若 `provider_place_id` 不在本次正式竞品集合内，HTML 或 Bitable 输出快速失败，避免生成孤立、错绑或未展示的图片；JSON 和 Feishu 摘要的核心投测仍可独立运行。
 
 ## 输出
 
@@ -46,6 +47,8 @@ Skill 使用未舍入 Haversine 距离判断 `0 <= distance_meters <= 2000`。�
 - `input_sha256`、`defaults_sha256` 和 `skill_version`：轻量追溯字段；后者来自发布包内的 `VERSION`。
 
 选择 `--format html` 时，标准输出是一份独立的竞品调研 HTML：含 2km 范围、完成状态、正式竞品房型/报价、可选装修观察与图片形成的视觉竞品对标区、ADR 表、排除候选、核心结果已计算的投资回报与按月回本表，以及与投资测算的衔接。`pre_evaluation_only` 会在报告中显式保留，不能被渲染成正式竞品结论。
+
+选择 `--format bitable` 时，标准输出是一份 Feishu Bitable 交付清单。它含模板、按逻辑记录键组织的八张表记录、待解析的记录关联以及待上传的内嵌图片字节；不含 Base token、用户身份、API 调用、公式或远程抓取规则。`项目测算总表.结论范围` 保留与 `conclusion_scope` 相同的值。完整模板与宿主写入顺序见 `references/bitable-delivery.md`。
 
 不要将竞品建议自动写入 `project_input`。由业务审核人明确选择 ADR/OCC/房型假设后再重新运行。
 

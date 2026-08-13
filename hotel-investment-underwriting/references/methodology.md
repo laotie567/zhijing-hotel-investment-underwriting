@@ -95,3 +95,14 @@ The renderer embeds its styles and supplied image bytes, so the saved HTML can
 be opened offline; source links remain traceability links only. It cannot
 upgrade `pre_evaluation_only` evidence to a completed conclusion or automatically
 change ADR or financial assumptions.
+
+## Feishu Bitable delivery
+
+`--format bitable` maps the already calculated result into the standard
+eight-table delivery manifest. It preserves values and lineage only: financial
+formulas, payoff logic, ADR aggregation and classification remain in the same
+Skill run. The authorized host creates or verifies the standard Base, upserts
+records by their logical record keys, resolves links, then uploads only the
+supplied image bytes. The source URL is not fetched. This keeps Feishu as a
+presentation and collaboration surface rather than a second calculator,
+crawler, workflow engine or state service.

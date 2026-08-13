@@ -1,33 +1,34 @@
 ---
 name: hotel-investment-underwriting
-description: Evaluate a Chinese co-operated esports hotel before signing by running mandatory 2km pure-esports competitor analysis and deterministic investment underwriting in one Skill. Use for property/address screening, competitor-based ADR reference, room-type pricing and visual-photo benchmarking, CapEx/return and month-level payback calculation, negotiation floors, Feishu-ready pre-investment conclusions, and standalone HTML competitor-research delivery for 智竞未来 or similar esports-hotel conversions.
+description: Run mandatory 2km pure-esports competitor analysis and deterministic Chinese co-operated esports-hotel underwriting. Use for address screening, ADR evidence, CapEx/return/monthly payback, visual HTML, or Feishu Bitable delivery.
 ---
 
 # Hotel Investment Underwriting
 
-Run one stateless Skill for one hotel opportunity. Use the model only for intake and explanation; bundled code decides distance, classification, ADR, and finance.
+One stateless Skill per hotel opportunity. Bundled code, not model prose, decides distance, classification, ADR and finance.
 
 ## Request
 
-Call only `scripts/run.py` with `project_input`, `competitor_analysis`, and optional `competitor_report`. `project_input` must pass `schemas/project-input.schema.json`; the unified envelope, evidence, offers, and media contract are in `schemas/skill-request.schema.json`.
+Call only `scripts/run.py` with `project_input`, `competitor_analysis`, and optional `competitor_report`. Financial input follows `schemas/project-input.schema.json`; the unified envelope, evidence, offers and media follow `schemas/skill-request.schema.json`.
 
-`competitor_analysis` is a required business stage: absent or incomplete evidence yields only `pre_evaluation_only`, never a hidden 2km conclusion. `competitor_report` is presentation-only and cannot change classification, ADR, or finance.
+Missing or incomplete `competitor_analysis` returns only `pre_evaluation_only`. `competitor_report` and optional candidate `market_profile` are delivery-only; neither changes classification, ADR or finance.
 
 ## Fixed sequence
 
-1. Obtain one user-confirmed GCJ-02 center from an authorized map source; ask the user to choose if it is ambiguous.
-2. Collect candidates from the same provider. Use `complete` only after its defined search finishes; otherwise use `partial`.
-3. Run the entrypoint. It applies the unrounded 0–2000 m Haversine boundary and exposes evidence gaps.
-4. Recommend ADR only with a complete collection, at least three independent formal competitors, same-workstation offers, one valid `pricing_context`, and `medium`/`high` confidence. Use the cross-property median, rounded to CNY 10.
-5. Explicitly choose the financial revenue assumption after reviewing competitors. Return both conclusions, risks, confidence, and missing evidence.
+1. Obtain a user-confirmed GCJ-02 center from an authorized map source; resolve ambiguity with the user.
+2. Collect same-provider candidates; use `complete` only after the defined search finishes, otherwise `partial`.
+3. Run the entrypoint; it applies the unrounded 0–2,000 m Haversine boundary and exposes gaps.
+4. Recommend ADR only with complete collection, valid shared `pricing_context`, at least three independent formal same-workstation properties, and `medium`/`high` confidence. Use the cross-property median, rounded to CNY 10.
+5. Explicitly select the financial revenue assumption; return conclusion, risks, confidence and missing evidence.
+6. For Base delivery, emit the manifest after this result; the authorized host writes it.
 
 ## Non-negotiable rules
 
-- Formal competitors are operating `pure_esports_hotel` properties within 2km, with the center's provider, place ID, GCJ-02 coordinates, and source record. Exclude incidental rooms, non-lodging, closed/out-of-range properties, and incomplete pricing evidence. Show low-confidence properties, but never sample their prices for ADR.
-- Never widen the radius or infer coordinates, status, positioning, source facts, ADR, OCC, or room facts. Incomplete evidence returns `evidence_insufficient` and caps finance as `pre_evaluation_only`.
-- Finance is code-only: never calculate its NPV, IRR, payback, break-even OCC, or negotiation floors in prose, or automatically write competitor ADR into financial input.
-- Visual evidence must bind to a formal `provider_place_id`. Portable HTML embeds JPEG/PNG/WebP `data:image/...;base64,...` bytes with caption and source URL; it never uses remote image files or invents missing visuals.
-- Map/crawler credentials, storage, approvals, and dispatch stay in the host. This Skill owns no database, crawler service, workflow state, or writeback.
+- Formal competitors are operating `pure_esports_hotel` properties within 2km with the center's provider, place ID, GCJ-02 coordinates and source. Exclude incidental, non-lodging, closed, out-of-range and incomplete evidence; show low-confidence properties but never sample their ADR.
+- Never widen radius or infer coordinates, status, positioning, source, ADR, OCC or room facts. Incomplete evidence is `evidence_insufficient` and caps finance at `pre_evaluation_only`.
+- Finance is code-only: never calculate NPV, IRR, payback, break-even OCC or negotiation floors in prose, nor write competitor ADR into financial input automatically.
+- Visual evidence must bind to a formal `provider_place_id`; HTML accepts only JPEG/PNG/WebP `data:image/...;base64,...` bytes with caption and source URL, never remote images.
+- Credentials, external tools, storage, approval, dispatch and Base writeback stay in the host; this Skill owns no crawler, database or workflow state.
 
 ## Run and read selectively
 
@@ -36,4 +37,4 @@ python3 scripts/run.py --input /path/to/skill-request.json \
   --defaults references/benchmark-defaults.json --format feishu
 ```
 
-Use `--format json` for structured output or `--format html > /path/to/competitor-research.html` for the standalone, responsive, no-JavaScript report. Read `references/input-schema.md` for finance fields and `references/methodology.md` plus `references/decision-policy.md` only when explaining results.
+Use `--format json` for structured output, `--format html > /path/to/competitor-research.html` for the responsive report, or `--format bitable > /path/to/bitable-delivery.json` for a standard Base manifest. Read `references/input-schema.md` for finance fields, `references/bitable-delivery.md` only for Base delivery, and `references/methodology.md` plus `references/decision-policy.md` only to explain results.

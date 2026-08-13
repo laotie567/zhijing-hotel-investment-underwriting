@@ -4,7 +4,7 @@
 
 - `SKILL.md`、`agents/openai.yaml`；
 - `VERSION`；
-- `scripts/run.py`、`input_contract.py`、`competitor_analysis.py`、`competitor_report.py`、`calculate.py`；
+- `scripts/run.py`、`input_contract.py`、`competitor_analysis.py`、`competitor_report.py`、`bitable_delivery.py`、`calculate.py`；
 - `schemas/` 与运行说明所需的 `references/`。
 
 测试、样例、根目录文档、生成结果和旧包均不会进入生产 ZIP。根目录与 Skill
@@ -13,8 +13,8 @@
 目录的 `.gitattributes` 仅是仓库打包保护文件，不属于实际交付物。
 
 ```bash
-git archive --format=zip --output hotel-investment-underwriting-v0.9.0.zip \
-  v0.9.0 hotel-investment-underwriting
+git archive --format=zip --output hotel-investment-underwriting-vX.Y.Z.zip \
+  vX.Y.Z hotel-investment-underwriting
 ```
 
 从已验证的 tag 打包，不从未提交工作区打包。解压后的入口是
@@ -34,6 +34,7 @@ git archive --format=zip --output hotel-investment-underwriting-v0.9.0.zip \
 3. 组装统一请求并调用 `scripts/run.py`。
 4. 先读取 `workflow.status`，再展示竞品和财务结果。
 5. 如需交付竞品调研，使用相同请求执行 `--format html` 并将标准输出保存为 `.html` 文件。
+6. 如需交付飞书多维表格，使用相同请求执行 `--format bitable` 并将标准输出保存为 JSON 清单；已授权宿主按 `references/bitable-delivery.md` 创建/验证模板并写入。Skill 本身不持有飞书凭证或写入状态。
 
 无法确认点位、候选证据不完整或重复 `provider_place_id` 时，Skill 返回
 `pre_evaluation_only`，而不是伪造完整的竞品结论。
@@ -53,6 +54,17 @@ python3 hotel-investment-underwriting/scripts/run.py \
 ```
 
 该 HTML 不需要 Python、Skill 目录或网络资源来展示内容；样式和已提供的房图都在文件内。浏览器打开来源链接时才需要网络。
+
+```bash
+python3 hotel-investment-underwriting/scripts/run.py \
+  --input /path/to/skill-request.json \
+  --defaults hotel-investment-underwriting/references/benchmark-defaults.json \
+  --format bitable > /path/to/bitable-delivery.json
+```
+
+该清单不依赖于当前机器上的飞书 CLI、环境变量或网络连接；它可由任何已授权的
+Feishu 宿主应用到标准 Base。基于表名和逻辑记录键完成幂等写入，随后解析关联并
+上传 `data_uri` 图片；不可用来源 URL 代替图片数据。
 
 ## 发布检查
 

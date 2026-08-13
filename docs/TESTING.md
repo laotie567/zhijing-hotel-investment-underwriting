@@ -11,6 +11,7 @@
 - `calculate.py` 不能作为独立 CLI 绕过 2km 阶段；
 - 静态回本月数必须复现历史“初投 ÷ 首年平均月经营净现金”口径，并同时返回保守向上取整月数；首年经营净现金非正时不得伪造回本月数；
 - `--format html` 生成移动端可读的独立 HTML，包含竞品房型/报价表、独立视觉竞品对标区、已计算的月度回本表和已提供的内嵌图片；无图片时明确提示补证，不加载外部脚本、样式或图片，并保留 `pre_evaluation_only` 结论范围；
+- `--format bitable` 生成八张标准表的无凭证交付清单；它必须保留已计算的核心财务结果、完整输入路径、竞品/报价/视觉证据和 `pre_evaluation_only` 范围，且不得含公式、查找字段、飞书凭证或远程图片抓取；
 - 财务 Golden Master 和核心回归保持通过。
 
 ## 命令
@@ -43,8 +44,9 @@ python3.11 "$YAO_META_SKILL/scripts/resource_boundary_check.py" \
 - [ ] 所有 Skill 测试通过；
 - [ ] Skill 结构校验通过；
 - [ ] 维护者资源边界检查通过；该检查工具不进入生产 ZIP；
-- [ ] 用脱敏完整请求分别验证 JSON、Feishu 和 HTML 输出；
+- [ ] 用脱敏完整请求分别验证 JSON、Feishu 摘要、HTML 和 Bitable manifest 输出；
 - [ ] 在不具备 Skill 目录的浏览器环境打开 HTML，验证文字、表格和内嵌图片可见；
+- [ ] 用获授权的 Feishu 身份读回标准模板的八张表及字段；首次真实项目写入时，再核验记录键、关联和已提供的视觉附件。
 - [ ] 生产 ZIP 只包含唯一 Skill 的运行文件和包内 `VERSION`；
 - [ ] 不含密钥、历史客户资料、测试、样例、旧包或历史 ZIP；
 - [ ] `VERSION`、`CHANGELOG.md` 和输出 `skill_version` 已同步更新；

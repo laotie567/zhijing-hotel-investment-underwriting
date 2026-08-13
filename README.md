@@ -1,13 +1,13 @@
 # 智竞未来电竞酒店投测 Skill
 
-当前发布版本：`0.9.0`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统、爬虫平台或项目数据库。
+当前开发版本：`0.10.0`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统、爬虫平台或项目数据库。
 
 它只做两件事：
 
 1. 分析确认点位 2km 内的纯电竞酒店竞品，输出可追溯竞品集和 ADR 参考；
 2. 用确定性财务机械计算投资、收入、成本、NPV、IRR、按月静态/动态回本期、盈亏平衡 OCC、退出红线和谈判底线。
 
-在上述结果完成后，Skill 可额外输出一份独立、响应式、单文件 HTML 竞品调研报告，含正式竞品的视觉对标区和已计算的投资回报/按月回本表；它只是结果交付层，不参与任何 2km、ADR 或财务判断。
+在上述结果完成后，Skill 可额外输出一份独立、响应式、单文件 HTML 竞品调研报告，或一份标准飞书多维表格交付清单；两者都只是结果交付层，不参与任何 2km、ADR 或财务判断。
 
 ## 唯一生产发布物
 
@@ -18,7 +18,9 @@ flowchart LR
     H["宿主 Agent / 飞书"] --> R["单一 Skill 请求"]
     E["已授权地图与竞品证据"] --> R
     R --> S["hotel-investment-underwriting"]
-    S --> O["2km 竞品结论 + 投资预评估 + 可选 HTML 调研报告"]
+    S --> O["2km 竞品结论 + 投资预评估"]
+    O --> H1["可选：独立 HTML 调研报告"]
+    O --> B["可选：飞书多维表格交付清单"]
 ```
 
 ## 核心规则
@@ -51,16 +53,27 @@ python3 hotel-investment-underwriting/scripts/run.py \
 
 HTML 内嵌样式、表格、文本以及请求中提供的 JPEG/PNG/WebP `data_uri` 图片；正式竞品的房图、装修观察、机位和同条件报价会集中在“视觉竞品对标”区，供人工调价研判。文件可脱离 Skill 运行环境在手机或电脑浏览器中打开；来源链接仅用于在线追溯，视觉证据不会自动改写 ADR 或财务输入。
 
+生成标准飞书多维表格交付清单：
+
+```bash
+python3 hotel-investment-underwriting/scripts/run.py \
+  --input /path/to/skill-request.json \
+  --defaults hotel-investment-underwriting/references/benchmark-defaults.json \
+  --format bitable > /path/to/bitable-delivery.json
+```
+
+该 JSON 是一个无凭证的写入清单：授权的宿主将它映射到八张标准表（项目总表、输入、成本、年度现金流、情景敏感性、房型、2km 竞品、报价与视觉证据）。它没有飞书 API 调用、公式、远程图片抓取或项目状态；相同输入指纹可幂等更新，变更输入会形成新的项目运行。详情见 [bitable-delivery.md](hotel-investment-underwriting/references/bitable-delivery.md)。
+
 请求契约见 [skill-request.schema.json](hotel-investment-underwriting/schemas/skill-request.schema.json)，财务字段见 [input-schema.md](hotel-investment-underwriting/references/input-schema.md)。
 
 ## 文档入口
 
 - [架构边界](docs/ARCHITECTURE.md)：宿主、Skill 与人工职责，以及失败策略。
 - [数据契约](docs/DATA_CONTRACTS.md)：请求、竞品事实、视觉证据与输出字段。
-- [部署与打包](docs/DEPLOYMENT.md)：生产运行、单文件 HTML 与发布包清单。
-- [运行说明](docs/OPERATIONS.md)：结果状态与补证动作。
+- [部署与打包](docs/DEPLOYMENT.md)：生产运行、HTML、飞书多维表格交付与发布包清单。
+- [运行说明](docs/OPERATIONS.md)：结果状态、补证动作与表格交付顺序。
 - [测试与发布验收](docs/TESTING.md)：必测行为和上线门槛。
-- [安全边界](docs/SECURITY.md)：凭证、来源和图片证据的处理规则。
+- [安全边界](docs/SECURITY.md)：凭证、来源、图片证据和飞书写入边界。
 - [Git 与版本](docs/GIT_WORKFLOW.md)、[版本说明](docs/VERSIONING.md)：提交、tag 与 GitHub 发布流程。
 
 仓库只保留运行、验证和维护这一生产 Skill 所需的文本源码。过期的区位包、施工守卫、任务/授权状态、审批/回放控制面、爬虫实现及历史客户原始文件均不在当前发布分支；需要追溯时使用 Git 历史。
