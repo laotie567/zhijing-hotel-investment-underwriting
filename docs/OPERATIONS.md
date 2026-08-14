@@ -3,7 +3,7 @@
 ## 日常流程
 
 1. 收集地址、计划改造房量、合同/成本/收入假设。
-2. 由宿主调用 `scripts/collect_market_evidence.py`；先确认服务环境已安全设置至少 32 字节的 `MARKET_EVIDENCE_RECEIPT_HMAC_KEY`，存在歧义时让用户选择同源地图点位后重试。
+2. Hermes 子 Agent 必须按 [HERMES_AGENT_AGENTS_TEMPLATE.md](HERMES_AGENT_AGENTS_TEMPLATE.md) 的 `AGENTS.md` 约束执行；由宿主调用 `scripts/collect_market_evidence.py`，先确认服务环境已安全设置至少 32 字节的 `MARKET_EVIDENCE_RECEIPT_HMAC_KEY`，存在歧义时让用户选择同源地图点位后重试。
 3. 分开读取两类状态：`spatial_collection`/`competitor_analysis.collection_status` 证明全量 2km 候选是否完成；五项覆盖度和 `collection_result.status` 说明标杆房型、图片及价格是否齐全。OTA 任一维度未完成会使回执为 `partial` 并阻止 ADR，但不会抹掉已完成的空间竞品结论。
 4. 将其 `skill-patch` 合并进项目财务输入，执行 `scripts/run.py`。
 5. 先看竞品状态，再看财务结论；需要时补充数据并重新运行。
@@ -27,6 +27,7 @@
 - 携程自动映射失败：`ctrip-live-rates-v1` 只在酒店名唯一精确且地址含可核验城市、搜索结果城市也一致时自动映射；补齐 `target.address` 或改为人工确认 `ota_property`，不要按名称猜测。
 - 实时报价预检失败：完成 Ui.Vision 配对、OpenCLI Browser Bridge 连接，并确保 `opencli ctrip search --help` 可用。旧的中断锁会在记录进程已不存在时自动回收；只有没有有效 PID 的异常锁才按 12 分钟过期回收。仍显示 busy 时等待当前任务结束，不要手工抢占活跃浏览器。
 - 新 Mac Mini/Hermes：标准链路先执行 `collect_market_evidence.py --preflight --engine ego-browser`，地图池按 Playwright 要求验收；若 Ego Lite 不在 `ready`，将 `install_hint` 展示给管理员并停止相应采集，不得伪造登录态或降级为无口径报价。携程实时价 Worker、Kimi WebBridge 等只在宿主显式启用时才需预检。
+- Hermes 子 Agent 未按顺序调用地图、OTA 与 `run.py`：停止该运行，不采纳其手工拼装的竞品、图片或投资结论；检查其工作目录是否已加载严格 `AGENTS.md`，再从预检重新开始。
 - 需要验证“不依赖 Codex Computer Use”的部署：以同一请求分别运行 `--engine playwright` 与 `--engine ego-browser`，检查两个页面回执和 `collector.engine`；不要使用桌面操作录屏或模型摘录替代 CLI 输出。完整步骤见 `END_TO_END_ACCEPTANCE.md`。
 - 2km 内没有合格竞品：如采集标记为 `complete`，这是有效结论；不要扩大半径来凑样本。
 - 有竞品但同机位少于三家独立物业：展示竞品，不输出对应机位 ADR 建议。

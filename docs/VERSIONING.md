@@ -1,11 +1,11 @@
 # 版本与发布
 
-当前开发版本为 `1.2.0`。生产发布物只有
+当前开发版本为 `1.2.1`。生产发布物只有
 `hotel-investment-underwriting/`，其包内 `VERSION` 是唯一版本来源：
 
 | 项目 | 当前状态 |
 |---|---|
-| 单一 Skill 入口 | `hotel-investment-underwriting/1.2.0` |
+| 单一 Skill 入口 | `hotel-investment-underwriting/1.2.1` |
 | 财务计算器 | 3.1.0，保留并由 Golden Master 锁定 |
 | 财务输入契约 | `project-input.schema.json` |
 | 2km 竞品请求契约 | `skill-request.schema.json` |
@@ -20,3 +20,6 @@
 已验证 tag 打包唯一的 Skill 目录。页面回执 HMAC 密钥是宿主部署配置，不随包、测试
 样例或 Git 发布。页面采集源码和锁定依赖随 Skill 发布，但来源
 会话/凭证、持久化和消息通道仍由宿主拥有。
+
+`docs/HERMES_AGENT_AGENTS_TEMPLATE.md` 是仓库级部署模板，不是生产 ZIP 的运行时依赖；
+它通过 GitHub 仓库向 Hermes 管理员交付，`AGENTS.md` 的实际加载和执行仍由 Hermes 负责。

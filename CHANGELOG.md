@@ -1,5 +1,13 @@
 # 变更记录
 
+## 1.2.1 - 2026-08-14
+
+### Hermes deployment guidance
+
+- 新增仓库级 `docs/HERMES_AGENT_AGENTS_TEMPLATE.md`：为 Hermes 子 Agent 提供可直接复制的严格执行协议，固定预检、2km 地图池、OTA 证据、唯一测算入口、状态解释与人工介入边界。
+- README、部署、运维、测试与版本说明同步链接该模板，明确 Agent 可自行运行预检和 CLI；浏览器首次登录、验证码与宿主 HMAC 密钥仍由管理员完成。
+- 该模板是部署文档而非生产运行时依赖，不进入单一 Skill ZIP，不增加模型首屏上下文负担。
+
 ## 1.2.0 - 2026-08-14
 
 ### Security and evidence integrity

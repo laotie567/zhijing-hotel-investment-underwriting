@@ -55,6 +55,7 @@ python3.11 "$YAO_META_SKILL/scripts/resource_boundary_check.py" \
 - [ ] 用脱敏完整请求分别验证 JSON、Feishu 摘要、HTML 和 Bitable manifest 输出；
 - [ ] 用已授权的来源页面跑一次 Playwright 地图 Profile、Ego Lite OTA Profile 和（如作为生产报价源）Ui.Vision+OpenCLI 携程实时价 Profile；对全量 2km 候选、最多 8 家标杆、房型、图片以及同条件房态/价格逐项人工抽检；确认每条 P2 通过 Network/DOM 和 `ctrip-dom-parser/v1`，保存不含 Cookie 的页面回执。每次更换/更新 Ego Lite、Ui.Vision、OpenCLI、Scrapling 注册表、Kimi WebBridge、crawl4ai 或 xcrawl Profile 后也执行此验收；
 - [ ] 在目标 Mac Mini 上执行 `--preflight --engine ego-browser`，并检查 Playwright 地图运行时；确认标准 Profile 为 `ready`，并对显式启用的可选引擎保留可执行的 `install_hint`；
+- [ ] 将 `HERMES_AGENT_AGENTS_TEMPLATE.md` 中的代码块部署为 Hermes 子 Agent 的 `AGENTS.md`；用一个脱敏地址验证该 Agent 会先执行预检、调用地图与 OTA CLI、拒绝手工 `market_evidence`，并在证据不完整时如实返回 `pre_evaluation_only`；
 - [ ] 在不具备 Skill 目录的浏览器环境打开 HTML，验证文字、表格和内嵌图片可见；
 - [ ] 用获授权的 Feishu 身份读回标准模板的八张表及字段；首次真实项目写入时，再核验记录键、关联、`交付载荷状态`/`市场证据状态`/`ADR证据状态`/`投决准备状态`、各子表 `交付状态` 和已提供的视觉附件。
 - [ ] 生产 ZIP 只包含唯一 Skill 的运行文件和包内 `VERSION`；

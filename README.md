@@ -1,6 +1,6 @@
 # 智竞未来电竞酒店投测 Skill
 
-当前开发版本：`1.2.0`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统或项目数据库。它包含一个无界面的、可替换引擎的页面市场证据采集工具。
+当前开发版本：`1.2.1`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统或项目数据库。它包含一个无界面的、可替换引擎的页面市场证据采集工具。
 
 它做三件彼此分离的事：
 
@@ -78,6 +78,18 @@ python3 hotel-investment-underwriting/scripts/run.py \
 
 请求契约见 [skill-request.schema.json](hotel-investment-underwriting/schemas/skill-request.schema.json)，财务字段见 [input-schema.md](hotel-investment-underwriting/references/input-schema.md)。
 
+## Hermes 子 Agent
+
+不要仅以自然语言要求 Hermes “使用这个 Skill”。将完整的
+[Hermes 子 Agent 严格执行模板](docs/HERMES_AGENT_AGENTS_TEMPLATE.md) 交给 Hermes，令其将
+代码块内容原样保存为该子 Agent 工作目录的 `AGENTS.md`，并只替换 `SKILL_ROOT` 的绝对路径。
+该模板强制 Agent 先运行预检、只消费宿主签名的采集回执、按“地图全量池 → OTA 标杆 →
+唯一测算入口”执行，并如实报告 `pre_evaluation_only` 与证据缺口。
+
+Agent 可以自行执行预检和 CLI；管理员只需完成浏览器首次安装/登录、验证码和宿主 HMAC
+密钥配置。详细部署与故障处理见 [DEPLOYMENT.md](docs/DEPLOYMENT.md) 和
+[OPERATIONS.md](docs/OPERATIONS.md)。
+
 ## 文档入口
 
 - [架构边界](docs/ARCHITECTURE.md)：宿主、Skill 与人工职责，以及失败策略。
@@ -88,5 +100,6 @@ python3 hotel-investment-underwriting/scripts/run.py \
 - [端到端验收](docs/END_TO_END_ACCEPTANCE.md)：不用 Codex Computer Use 的真实页面采集、测算与交付验证路径。
 - [安全边界](docs/SECURITY.md)：凭证、来源、图片证据和飞书写入边界。
 - [Git 与版本](docs/GIT_WORKFLOW.md)、[版本说明](docs/VERSIONING.md)：提交、tag 与 GitHub 发布流程。
+- [Hermes 子 Agent 模板](docs/HERMES_AGENT_AGENTS_TEMPLATE.md)：严格执行当前 Skill 的 `AGENTS.md` 模板与部署步骤。
 
 仓库只保留运行、验证和维护这一生产 Skill 所需的文本源码。过期的区位包、施工守卫、任务/授权状态、审批/回放控制面、旧爬虫实现及历史客户原始文件均不在当前发布分支；需要追溯时使用 Git 历史。

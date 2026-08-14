@@ -50,6 +50,18 @@ python3 scripts/collect_market_evidence.py --preflight --engine ego-browser
 Hermes。Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl 等可选扩展可以保持
 `action_required`，不会妨碍已就绪的 Playwright/Ego Lite 标准链路。
 
+## Hermes 子 Agent 约束
+
+在 Hermes 中创建专用投资分析子 Agent 时，将
+[HERMES_AGENT_AGENTS_TEMPLATE.md](HERMES_AGENT_AGENTS_TEMPLATE.md) 的代码块原样放入该
+Agent 工作目录的 `AGENTS.md`，只替换 `SKILL_ROOT` 的绝对路径。不要只用“请使用 Skill”这类
+自然语言绑定：它不能约束 Agent 伪造市场回执、跳过 2km 地图池或误读 Feishu 写入状态。
+
+子 Agent 应自行执行 Playwright 与 Ego Lite 的预检并读取 JSON 中的 `ready` /
+`action_required`；前者才允许继续，后者必须把 `install_hint` 交给管理员。管理员只处理
+首次浏览器安装/登录、验证码和 `MARKET_EVIDENCE_RECEIPT_HMAC_KEY` 的服务环境配置。Agent
+不得读取、回显或创建该密钥，也不得把 Computer Use、搜索摘要或手工页面摘录替代 CLI 回执。
+
 如需 P2 强校验而选择**可选**的携程实时价 Profile，才需要单独的 Chrome `ctrip-price-worker` Profile，并在该
 Profile 中安装 OpenCLI Browser Bridge 和 Ui.Vision；管理员正常登录携程、完成验证码和
 Ui.Vision 的本机配对。再安装固定 Bridge 版本：
@@ -85,7 +97,8 @@ Ego Lite 登录态仅驻留在这台 Mac Mini。若 OTA 显示“登录看低价
 1. 标准路径先用 `360-map-v1` 的住宿发现词组采集中心点和全量同源 2km 住宿候选，保留主营电竞和“普通住宿含电竞房”两类，并保存回执中的 `spatial_collection`；再把**全量**候选和这份带不可变候选快照哈希的原样 `candidate_pool` 交给 Ego `ctrip-hotel-v1`。该 Profile 要求显式 OTA 实体映射；只有显式启用的 P2 扩展 `ctrip-live-rates-v1` 才可按名称+城市唯一精确地自动映射。OTA 回执必须原样返回该池，且运行器拒绝引擎/Profile/中心/候选 ID 或不可变快照不匹配。
 2. `competitor_analysis.collection_status=complete` 只表示全量 2km 空间候选已被证明完成。房型、图片、同条件报价的 `partial` 仍使**采集回执**为 `partial`，阻止 ADR 或完整交付，但不会把已完成的空间竞品集合降级为未完成。
 3. 把 `--format skill-patch` 输出与项目财务输入组装为统一请求并调用 `scripts/run.py`。
-4. 先读取 `workflow.status`，再展示竞品和财务结果。
+4. 先读取顶层 `status`、`workflow.status` 与 `conclusion_scope`，再展示竞品和财务结果；
+   `execution_status=ok` 只代表程序执行成功，不代表投决就绪。
 5. 如需交付竞品调研，使用相同请求执行 `--format html` 并将标准输出保存为 `.html` 文件。
 6. 如需交付飞书多维表格，使用相同请求执行 `--format bitable` 并将标准输出保存为 JSON 清单；分别读取 `delivery_gate.payload_write_eligible`、`market_evidence_status`、`adr_evidence_status` 和 `investment_decision_scope`。载荷可写只表示八张表可写入并读回，不能代表市场证据、ADR 或投决已完成；宿主读回记录、关联和附件后，只能把 `交付载荷状态` 从“待写入核验”改为“写入已核验”。已授权宿主按 `references/bitable-delivery.md` 创建/迁移模板并写入。Skill 本身不持有飞书凭证或写入状态。
 
