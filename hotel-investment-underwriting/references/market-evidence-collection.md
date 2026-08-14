@@ -125,7 +125,10 @@ Bridge。Ui.Vision 是**唯一**页面动作执行者；OpenCLI 只绑定同一�
 无页面副作用的 `opencli ctrip search --help`，使缺少该本机插件在上线前可见。
 
 该 Profile 把真实页面所见的 P1/P2/P3 记录为 `pricing_observations`，供 HTML 与飞书
-展示；只有 P2 同时满足完全相同的报价条件、Network/DOM 价格一致、可订、税费、取消
+展示。Ui.Vision 采集后，OpenCLI 只读当前页面的受限房型 DOM 观察；包内 Scrapling
+`ctrip-dom-parser/v1` 离线以 `ctrip-element-registry/v1` 解析它。该解析器不是浏览器或
+第二采集源，不发请求、不读 Cookie，并且解析失败会产生 `DOM_SCHEMA_DRIFT`。只有 P2 同时
+通过这一版本化 DOM 解析、完全相同的报价条件、Network/DOM 价格一致、可订、税费、取消
 政策及机位数时，才另写入严格的 `room_offers` 并可参与 ADR。页面没有回显请求的日期和
 人数时必记 `pricing_context_unverified`，即使 Network/DOM 数字相同也绝不能 ADR-eligible。
 公开图片只从酒店/房型/图库上下文选择，过滤账号头像、Logo 与二维码；所有标杆共用总

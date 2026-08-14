@@ -34,6 +34,10 @@ CTRIP_UIVISION_INSTALL_URL = "https://chromewebstore.google.com/detail/ui-vision
 OPENCLI_INSTALL_URL = "https://github.com/jackwener/OpenCLI"
 UIVISION_BRIDGE_PACKAGE = "uivision-mcp-bridge"
 UIVISION_MCP_TOKEN_FILE = Path.home() / ".uivision_mcp_token"
+CTRIP_DOM_PARSER = PACKAGE_ROOT / "scripts" / "ctrip_dom_parser.py"
+CTRIP_DOM_REGISTRY = COLLECTOR_ROOT / "ctrip_element_registry.json"
+SCRAPLING_REQUIREMENTS = COLLECTOR_ROOT / "requirements-scrapling.txt"
+LOCAL_PARSER_PYTHON = COLLECTOR_ROOT / ".venv" / "bin" / "python"
 
 
 def _status(
@@ -171,6 +175,82 @@ def _ctrip_search_plugin_ready(opencli: str) -> bool:
     return probe.returncode == 0
 
 
+def _ctrip_dom_parser_python() -> str | None:
+    """Select the isolated parser interpreter without accepting shell syntax."""
+
+    configured = os.environ.get("MARKET_EVIDENCE_PARSER_PYTHON", "").strip()
+    if configured:
+        # The Node adapter calls this as an executable argument, not through a
+        # shell. Reject a multi-token value here so deployment failures are
+        # clear and cannot turn into arbitrary local commands.
+        try:
+            tokens = shlex.split(configured)
+        except ValueError:
+            return None
+        if len(tokens) != 1:
+            return None
+        executable = tokens[0]
+        return executable if shutil.which(executable) or Path(executable).is_file() else None
+    if LOCAL_PARSER_PYTHON.is_file():
+        return str(LOCAL_PARSER_PYTHON)
+    return shutil.which("python3.11")
+
+
+def _ctrip_dom_parser_status() -> dict[str, Any]:
+    """Verify the parser-only Scrapling runtime without opening a browser."""
+
+    missing = [str(path.relative_to(PACKAGE_ROOT)) for path in (CTRIP_DOM_PARSER, CTRIP_DOM_REGISTRY, SCRAPLING_REQUIREMENTS) if not path.is_file()]
+    if missing:
+        return _status(
+            "failed",
+            "Bundled Ctrip DOM parser files are missing from this Skill package.",
+            details={"missing": missing},
+        )
+    executable = _ctrip_dom_parser_python()
+    install_hint = (
+        "Install the isolated parser runtime: `python3.11 -m venv collector/.venv && "
+        "collector/.venv/bin/python -m pip install -r collector/requirements-scrapling.txt`. "
+        "Or set MARKET_EVIDENCE_PARSER_PYTHON to one Python 3.10+ executable."
+    )
+    if executable is None:
+        return _status(
+            "action_required",
+            "Python 3.10+ is unavailable for the offline Scrapling Ctrip DOM parser.",
+            install_hint=install_hint,
+        )
+    try:
+        probe = subprocess.run(
+            [
+                executable,
+                "-c",
+                (
+                    "import sys; "
+                    "assert sys.version_info >= (3, 10); "
+                    "import scrapling; "
+                    "assert getattr(scrapling, 'Selector', None) is not None"
+                ),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=12,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        probe = None
+    if probe is None or probe.returncode != 0:
+        return _status(
+            "action_required",
+            "The offline Scrapling Ctrip DOM parser runtime is not ready.",
+            install_hint=install_hint,
+            details={"python": executable},
+        )
+    return _status(
+        "ready",
+        "Python 3.10+ and the parser-only Scrapling runtime are available for Ctrip DOM validation.",
+        details={"python": executable, "registry": "ctrip-element-registry/v1"},
+    )
+
+
 def _ctrip_live_rates_status() -> dict[str, Any]:
     """Check only deployment prerequisites; never open a booking page or read a session."""
 
@@ -246,6 +326,15 @@ def _ctrip_live_rates_status() -> dict[str, Any]:
                 "Install or enable the approved OpenCLI Ctrip integration in the ctrip-price-worker "
                 "profile, then run `opencli ctrip search --help` and retry preflight."
             ),
+            details=details,
+        )
+    dom_parser = _ctrip_dom_parser_status()
+    details["scrapling_dom_parser"] = dom_parser
+    if dom_parser["state"] != "ready":
+        return _status(
+            "action_required" if dom_parser["state"] == "action_required" else "failed",
+            "Ctrip live-rate collection requires the bundled offline Scrapling DOM parser.",
+            install_hint=dom_parser.get("install_hint"),
             details=details,
         )
     bridge_probe = _probe_uivision_bridge(bridge)

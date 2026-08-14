@@ -37,6 +37,7 @@ PUBLISHED_FILES = {
     f"{SKILL_PREFIX}scripts/input_contract.py",
     f"{SKILL_PREFIX}scripts/market_evidence_contract.py",
     f"{SKILL_PREFIX}scripts/market_evidence_runtime.py",
+    f"{SKILL_PREFIX}scripts/ctrip_dom_parser.py",
     f"{SKILL_PREFIX}scripts/competitor_analysis.py",
     f"{SKILL_PREFIX}scripts/competitor_report.py",
     f"{SKILL_PREFIX}scripts/bitable_delivery.py",
@@ -47,6 +48,8 @@ PUBLISHED_FILES = {
     f"{SKILL_PREFIX}collector/playwright_360_map.mjs",
     f"{SKILL_PREFIX}collector/ego_ctrip.mjs",
     f"{SKILL_PREFIX}collector/ctrip_live_rates.mjs",
+    f"{SKILL_PREFIX}collector/ctrip_element_registry.json",
+    f"{SKILL_PREFIX}collector/requirements-scrapling.txt",
 }
 
 

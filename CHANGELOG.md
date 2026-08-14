@@ -1,5 +1,23 @@
 # 变更记录
 
+## 1.1.0 - 2026-08-14
+
+### Added
+
+- 携程实时价 Profile 新增包内 `ctrip-dom-parser/v1`：Ui.Vision 仍是唯一页面动作执行者，OpenCLI 仍只读 Network/DOM；Scrapling 只在本机离线解析最多 1MB 的受限房型 DOM 观察，不拥有浏览器、抓取、代理、MCP 或凭证能力。
+- 新增 `ctrip-element-registry/v1` 与锁定的 parser-only Scrapling 依赖。只有房型容器可在维护时显式使用已保存的自适应元数据；房型卡、价格、税费、取消政策、机位等重复字段禁止自适应恢复，防止把错误元素扩散为报价。
+- Mac Mini/Hermes `ctrip-live-rates` 预检新增 Python 3.10+、Scrapling 与元素注册表检查；新主机按 `collector/requirements-scrapling.txt` 建立项目本地虚拟环境即可，不依赖 Codex Computer Use。
+
+### Fixed
+
+- P2 价格现在必须同时通过版本化离线 DOM 解析、既有 Network/DOM 同价、统一入住条件、可订、税费、取消政策和机位校验。解析器缺失、页面布局漂移或无法形成房型卡时返回 `DOM_SCHEMA_DRIFT` / `dom_parser_unverified`，保留原始观察但严格拒绝 ADR。
+- 修复空税费文案被误判为“不含税”的风险；缺少明确税费标签现在保留为未知并阻断 ADR。
+- 发布 ZIP 精确白名单已纳入解析器、注册表和锁定依赖；测试覆盖正常布局、布局漂移的受限容器恢复、离线边界、缺税费、预检和 ADR 阻断。
+
+### Deployment note
+
+- Ui.Vision 扩展与本机 MCP Bridge 的配对仍是管理员在 `ctrip-price-worker` Chrome Profile 中完成的外部前置。预检会显式阻断未配对环境，绝不会通过 Codex UI、替代引擎或列表价绕过。
+
 ## 1.0.0 - 2026-08-14
 
 ### Breaking changes / migration

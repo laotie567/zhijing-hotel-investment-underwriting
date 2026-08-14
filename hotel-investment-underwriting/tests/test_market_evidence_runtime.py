@@ -79,6 +79,17 @@ class MarketEvidenceRuntimeTests(unittest.TestCase):
 
         self.assertEqual(["opencli", "ctrip", "search", "--help"], run.call_args.args[0])
 
+    def test_ctrip_dom_parser_preflight_requires_a_local_python310_scrapling_runtime(self) -> None:
+        with patch.object(market_evidence_runtime, "_ctrip_dom_parser_python", return_value="/tmp/python"), patch.object(
+            market_evidence_runtime.subprocess,
+            "run",
+            return_value=market_evidence_runtime.subprocess.CompletedProcess(args=["/tmp/python"], returncode=1),
+        ):
+            result = market_evidence_runtime._ctrip_dom_parser_status()
+
+        self.assertEqual("action_required", result["state"])
+        self.assertIn("requirements-scrapling.txt", result["install_hint"])
+
 
 if __name__ == "__main__":
     unittest.main()

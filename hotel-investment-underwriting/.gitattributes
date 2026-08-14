@@ -13,6 +13,7 @@ scripts/calculate.py -export-ignore
 scripts/collect_market_evidence.py -export-ignore
 scripts/market_evidence_contract.py -export-ignore
 scripts/market_evidence_runtime.py -export-ignore
+scripts/ctrip_dom_parser.py -export-ignore
 
 collector/* export-ignore
 collector/package.json -export-ignore
@@ -20,6 +21,8 @@ collector/package-lock.json -export-ignore
 collector/playwright_360_map.mjs -export-ignore
 collector/ego_ctrip.mjs -export-ignore
 collector/ctrip_live_rates.mjs -export-ignore
+collector/ctrip_element_registry.json -export-ignore
+collector/requirements-scrapling.txt -export-ignore
 scripts/competitor_analysis.py -export-ignore
 scripts/competitor_report.py -export-ignore
 scripts/bitable_delivery.py -export-ignore

@@ -4,10 +4,10 @@
 
 - 未确认点位不生成竞品结论；
 - `market-evidence-collection/v2` 必须拒绝大于 2km 的页面采集范围、未知引擎、无页面回执或“覆盖度不完整却声称 complete”的结果；OTA 二阶段必须带完整 `candidate_pool`，并拒绝引擎/Profile/中心/候选数量或 ID 指纹与请求不一致的回执；Playwright、Ego Lite 与携程实时价均是显式 Profile，不得静默回退到其他引擎；
-- `--preflight --all-engines` 必须把缺少 Ego Lite、Ui.Vision/OpenCLI 配对、OpenCLI Ctrip 搜索命令、Kimi WebBridge 适配器/扩展或其他运行时明确标为 `action_required` 并给出安装动作；
+- `--preflight --all-engines` 必须把缺少 Ego Lite、Ui.Vision/OpenCLI 配对、OpenCLI Ctrip 搜索命令、Python 3.10+ / 锁定 Scrapling DOM 解析器、Kimi WebBridge 适配器/扩展或其他运行时明确标为 `action_required` 并给出安装动作；
 - 只保留 2km 内、与中心同一地图 provider、营业中、主营电竞住宿且来源完整的正式竞品；名称仅含“电竞房”的普通酒店不得被误判为主营电竞住宿；
 - 重复 `provider_place_id`、缺少来源和不完整采集阻断正式结论；
-- 同一酒店的多条房型报价只计一个独立样本；仅同一入住日期、晚数、人数、CNY、可订状态、税费和取消口径均完整、且携程 P2 Network/DOM 双证据一致的中/高置信度报价可计入；页面未回显报价条件时必须标记 `pricing_context_unverified`，至少三家独立竞品才产生 ADR 参考；
+- 同一酒店的多条房型报价只计一个独立样本；仅同一入住日期、晚数、人数、CNY、可订状态、税费和取消口径均完整、且携程 P2 经过版本化 Scrapling DOM 解析并与 Network 双证据一致的中/高置信度报价可计入；页面未回显报价条件时必须标记 `pricing_context_unverified`，布局漂移时必须标记 `DOM_SCHEMA_DRIFT` / `dom_parser_unverified`，至少三家独立竞品才产生 ADR 参考；
 - `run.py` 同时返回竞品分析和财务预评估，且不自动改写收入假设；
 - 未知或非法 `project_input` 字段在公共入口失败；
 - `calculate.py` 不能作为独立 CLI 绕过 2km 阶段；
@@ -52,7 +52,7 @@ python3.11 "$YAO_META_SKILL/scripts/resource_boundary_check.py" \
 - [ ] Skill 结构校验通过；
 - [ ] 维护者资源边界检查通过；该检查工具不进入生产 ZIP；
 - [ ] 用脱敏完整请求分别验证 JSON、Feishu 摘要、HTML 和 Bitable manifest 输出；
-- [ ] 用已授权的来源页面跑一次 Playwright 地图 Profile 和 Ego Lite OTA Profile；对全量 2km 候选、标杆集、房型、图片以及同条件房态/价格逐项人工抽检；保存不含 Cookie 的页面回执。每次更换/更新 Ego Lite、Kimi WebBridge、crawl4ai、xcrawl 或 OpenCLI Profile 后也执行此验收；
+- [ ] 用已授权的来源页面跑一次 Playwright 地图 Profile、Ego Lite OTA Profile 和（如作为生产报价源）Ui.Vision+OpenCLI 携程实时价 Profile；对全量 2km 候选、最多 8 家标杆、房型、图片以及同条件房态/价格逐项人工抽检；确认每条 P2 通过 Network/DOM 和 `ctrip-dom-parser/v1`，保存不含 Cookie 的页面回执。每次更换/更新 Ego Lite、Ui.Vision、OpenCLI、Scrapling 注册表、Kimi WebBridge、crawl4ai 或 xcrawl Profile 后也执行此验收；
 - [ ] 在目标 Mac Mini 上执行 `--preflight --all-engines`；确认要求使用的 Profile 均为 `ready`，并对未安装的浏览器/扩展保留可执行的 `install_hint`；
 - [ ] 在不具备 Skill 目录的浏览器环境打开 HTML，验证文字、表格和内嵌图片可见；
 - [ ] 用获授权的 Feishu 身份读回标准模板的八张表及字段；首次真实项目写入时，再核验记录键、关联、`交付完整性`/`交付状态` 和已提供的视觉附件。

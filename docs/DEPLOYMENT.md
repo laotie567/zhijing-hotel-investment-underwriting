@@ -4,8 +4,8 @@
 
 - `SKILL.md`、`agents/openai.yaml`；
 - `VERSION`；
-- `scripts/run.py`、`collect_market_evidence.py`、`market_evidence_contract.py`、`market_evidence_runtime.py`、`input_contract.py`、`competitor_analysis.py`、`competitor_report.py`、`bitable_delivery.py`、`calculate.py`；
-- `collector/` 中锁定的 Playwright、Ego Lite 与 Ui.Vision+OpenCLI 携程实时价采集 Profile 源码；
+- `scripts/run.py`、`collect_market_evidence.py`、`market_evidence_contract.py`、`market_evidence_runtime.py`、`ctrip_dom_parser.py`、`input_contract.py`、`competitor_analysis.py`、`competitor_report.py`、`bitable_delivery.py`、`calculate.py`；
+- `collector/` 中锁定的 Playwright、Ego Lite 与 Ui.Vision+OpenCLI 携程实时价采集 Profile 源码，以及仅离线解析用的 Scrapling 锁定依赖和 Ctrip 元素注册表；
 - `schemas/` 与运行说明所需的 `references/`。
 
 测试、样例、根目录文档、生成结果和旧包均不会进入生产 ZIP。根目录与 Skill
@@ -25,7 +25,7 @@ git archive --format=zip --output hotel-investment-underwriting-vX.Y.Z.zip \
 
 ## 运行要求
 
-- Python 3.10+；核心测算只依赖标准库；
+- Python 3.10+；核心测算只依赖标准库。选择 `ctrip-live-rates` 时，另在项目本地虚拟环境中安装锁定的 Scrapling **解析器依赖**；它不含浏览器、抓取器、代理或凭证处理；
 - 页面证据采集默认需要 Node 20+、`collector/package-lock.json` 和 Chromium；安装命令见 `references/market-evidence-collection.md`；
 - Mac Mini/Hermes 在首次运行前必须执行 `python3 scripts/collect_market_evidence.py --preflight --all-engines`；Ego Lite、Ui.Vision+OpenCLI、OpenCLI Ctrip 搜索命令或 Kimi WebBridge 未安装/未连接时，按输出的 `install_hint` 安装并重启 Hermes。Ego Lite 与 Ui.Vision+OpenCLI 仅用于本机 macOS 认证页面会话，不替代云端采集器；
 - 宿主安全注入已授权页面来源会话/凭证；Skill 不读取或保存凭证；
@@ -39,6 +39,8 @@ git archive --format=zip --output hotel-investment-underwriting-vX.Y.Z.zip \
 cd hotel-investment-underwriting/collector
 npm ci
 npx playwright install chromium
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r requirements-scrapling.txt
 cd ..
 python3 scripts/collect_market_evidence.py --preflight --all-engines
 ```
@@ -58,9 +60,9 @@ npm install -g uivision-mcp-bridge@1.1.1
 python3 scripts/collect_market_evidence.py --preflight --engine ctrip-live-rates
 ```
 
-实时价采集严格由 Ui.Vision 改变页面状态、OpenCLI 只读 Network/DOM；预检还验证本机
+实时价采集严格由 Ui.Vision 改变页面状态、OpenCLI 只读 Network/DOM，Scrapling 只离线解析一个受大小限制的已观察房型 DOM 片段；预检还验证本机
 `opencli ctrip search --help`，以保证自动映射所需的 Ctrip 命令真实可用。回执不含 Cookie、
-请求头、令牌或原始响应 body。未登录、验证码、房源映射歧义、无库存和页面结构变动会
+请求头、令牌或原始响应 body。未登录、验证码、房源映射歧义、无库存和页面结构变动（`DOM_SCHEMA_DRIFT`）会
 返回明确的 `collection_issues`，而非静默写入空报价或伪 ADR。
 
 生产宿主只调用 CLI 或只监听本机的 HTTP 接口，绝不将浏览器操作转嫁给 Codex

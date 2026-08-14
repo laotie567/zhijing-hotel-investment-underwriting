@@ -9,11 +9,11 @@
  */
 
 import { createHash } from "node:crypto";
-import { closeSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const CONTRACT_VERSION = "market-evidence-collection/v2";
 const PROFILE = "ctrip-live-rates-v1";
@@ -23,6 +23,9 @@ const MAX_EMBEDDED_BYTES = 7_500_000;
 const MAX_NETWORK_DETAILS = 24;
 const MAX_IMAGES_PER_CANDIDATE = 4;
 const LOCK_MAX_AGE_MS = 12 * 60 * 1_000;
+const COLLECTOR_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const CTRIP_DOM_PARSER = path.join(COLLECTOR_ROOT, "..", "scripts", "ctrip_dom_parser.py");
+const LOCAL_PARSER_PYTHON = path.join(COLLECTOR_ROOT, ".venv", "bin", "python");
 
 function now() {
   return new Date().toISOString();
@@ -254,10 +257,10 @@ async function ensureMacro(bridge) {
   return macroName;
 }
 
-function runProcess(command, timeoutMs = 60_000) {
+function runProcess(command, timeoutMs = 60_000, input = null) {
   const [executable, ...args] = command;
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(executable, args, { stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
@@ -274,6 +277,7 @@ function runProcess(command, timeoutMs = 60_000) {
       if (code === 0) resolve({ stdout, stderr });
       else reject(new Error(redact(stderr || stdout || `${executable} exited ${code}`)));
     });
+    if (input !== null) child.stdin.end(input);
   });
 }
 
@@ -466,6 +470,59 @@ function domRates(facts) {
   return rows.slice(0, 80);
 }
 
+function ctripDomParserCommand() {
+  // This is intentionally an executable path, not a shell command: a host
+  // cannot smuggle arbitrary shell syntax into a production collection run.
+  const configured = compact(process.env.MARKET_EVIDENCE_PARSER_PYTHON || "", 500);
+  const python = configured || (existsSync(LOCAL_PARSER_PYTHON) ? LOCAL_PARSER_PYTHON : "python3.11");
+  return [python, CTRIP_DOM_PARSER, "--input", "-"];
+}
+
+function validatedScraplingRows(value) {
+  if (!value || typeof value !== "object" || value.parser_version !== "ctrip-dom-parser/v1" ||
+      value.registry_version !== "ctrip-element-registry/v1" || value.status !== "ok" ||
+      !Array.isArray(value.rooms) || !value.rooms.length) return null;
+  const rows = [];
+  for (const room of value.rooms.slice(0, 80)) {
+    if (!room || typeof room !== "object") continue;
+    const roomId = compact(room.room_id, 200) || null;
+    const roomName = compact(room.room_name, 300);
+    const price = Number(room.display_price);
+    if (!roomName || !Number.isInteger(price) || price <= 0 || price >= 100_000) continue;
+    rows.push({
+      room_id: roomId,
+      room_name: roomName,
+      rate_plan_name: compact(room.rate_plan_name, 300) || null,
+      price,
+      availability: ["available", "sold_out", "unknown"].includes(room.availability) ? room.availability : "unknown",
+      cancellation_policy: compact(room.cancellation_policy, 300) || null,
+      tax_included: typeof room.tax_included === "boolean" ? room.tax_included : null,
+      workstations: Number.isInteger(room.workstations) && room.workstations >= 1 && room.workstations <= 12 ? room.workstations : null,
+    });
+  }
+  return rows.length ? rows : null;
+}
+
+async function parseDomWithScrapling(facts, sourceUrl, pricingContext) {
+  const fragment = typeof facts?.room_panel_html === "string" ? facts.room_panel_html : "";
+  if (!fragment || Buffer.byteLength(fragment, "utf8") > 1_000_000) {
+    return { rows: domRates(facts), verified: false, reason: "no bounded room-panel DOM fragment" };
+  }
+  try {
+    const response = await runProcess(
+      ctripDomParserCommand(),
+      30_000,
+      JSON.stringify({ source_url: sourceUrl, dom_fragment: fragment, pricing_context: pricingContext }),
+    );
+    const parsed = parseJson(response.stdout);
+    const rows = validatedScraplingRows(parsed);
+    if (!rows) return { rows: domRates(facts), verified: false, reason: "Ctrip DOM parser reported schema drift" };
+    return { rows, verified: true, parser: parsed };
+  } catch (error) {
+    return { rows: domRates(facts), verified: false, reason: redact(error?.message || error, 240) };
+  }
+}
+
 function verifyContext(body, pricingContext) {
   const checkout = addNights(pricingContext.check_in_date, pricingContext.nights);
   const [, inMonth, inDay] = pricingContext.check_in_date.split("-").map(Number);
@@ -488,11 +545,12 @@ function matchRates(network, dom) {
   return matches;
 }
 
-function observation(match, context, sourceUrl, observedAt, contextVerified = true) {
+function observation(match, context, sourceUrl, observedAt, contextVerified = true, domParserVerified = true) {
   const rate = match.network;
   const dom = match.dom;
   const gaps = [];
   if (!contextVerified) gaps.push("pricing_context_unverified");
+  if (!domParserVerified) gaps.push("dom_parser_unverified");
   if (!match.price_match) gaps.push("network_dom_price_mismatch");
   if (rate.availability !== "available") gaps.push("availability_not_confirmed");
   if (rate.tax_included === null || dom?.tax_included === null) gaps.push("tax_scope_unknown");
@@ -554,14 +612,43 @@ const DOM_FACTS_SCRIPT = `(() => {
     .filter((item) => /酒店|房型|客房|room|hotel|gallery|album/i.test(item.context))
     .filter((item) => !/avatar|logo|qrcode|二维码/i.test(item.context)).slice(0, 12);
   const blocks = []; const seen = new Set();
+  const parserCards = [];
+  const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
   for (const element of [...document.querySelectorAll('div,li,section,article')]) {
     const text = String(element.innerText || '').trim();
     if (!text.includes('房') || !/(￥|¥)\\s*\\d/.test(text) || text.length > 1800 || seen.has(text)) continue;
     seen.add(text);
-    blocks.push({ text, room_id: element.getAttribute('data-room-id') || element.getAttribute('data-roomid') || element.getAttribute('data-room-type-id') || '' });
+    const roomId = element.getAttribute('data-room-id') || element.getAttribute('data-roomid') || element.getAttribute('data-room-type-id') || '';
+    blocks.push({ text, room_id: roomId });
+    const lines = text.split(/\\n+/).map((line) => compact(line, 300)).filter(Boolean);
+    const roomName = lines.find((line) => line.includes('房')) || '';
+    const prices = [...text.matchAll(/(?:￥|¥)\\s*([0-9][0-9,]*)/g)].map((match) => Number(match[1].replace(/,/g, ''))).filter((value) => Number.isFinite(value) && value > 0);
+    // This is a bounded, normalized *rendered DOM observation* for the
+    // offline parser. It is not a fabricated offer: each field is copied from
+    // the current card text, and the Network/DOM equality gate remains below.
+    if (roomName && prices.length === 1) {
+      const cancellation = (text.match(/(?:免费取消|不可取消|取消[^，。\\n]{0,80})/) || [''])[0];
+      const availability = /已订完|售罄|满房|不可订/.test(text) ? 'sold_out' : (/可订|立即预订/.test(text) ? 'available' : 'unknown');
+      const tax = /含税|税费已含/.test(text) && !/不含税|另付税|税费另计/.test(text) ? '含税' : '';
+      const workstations = (text.match(/(\\d+)\\s*(?:台|机)(?:电竞)?(?:电脑|位)?/i) || ['',''])[1];
+      parserCards.push('<article data-ctrip-room-card="true"' + (roomId ? ' data-room-id="' + escapeHtml(roomId) + '"' : '') + '>' +
+        '<span data-role="room-name">' + escapeHtml(roomName) + '</span>' +
+        '<span data-role="room-price" data-price="' + prices[0] + '">¥' + prices[0] + '</span>' +
+        '<span data-role="availability" data-availability="' + availability + '">' + availability + '</span>' +
+        '<span data-role="tax-scope">' + tax + '</span>' +
+        '<span data-role="cancellation">' + escapeHtml(cancellation) + '</span>' +
+        '<span data-role="workstations"' + (workstations ? ' data-workstations="' + workstations + '"' : '') + '>' + escapeHtml(workstations) + '</span>' +
+      '</article>');
+    }
     if (blocks.length >= 80) break;
   }
-  return { title: document.title, body, images, room_blocks: blocks };
+  // The parser receives only bounded public room-card observations, not the
+  // whole authenticated page. The wrapper gives its versioned registry a
+  // stable semantic root without exposing cookies or account data.
+  const roomPanelHtml = parserCards.length
+    ? '<section data-role="hotel-room-list">' + parserCards.join('') + '</section>'
+    : '';
+  return { title: document.title, body, images, room_blocks: blocks, room_panel_html: roomPanelHtml.slice(0, 950000) };
 })()`;
 
 async function collectOne(bridge, item, request, pageSources, imageBudget) {
@@ -598,7 +685,8 @@ async function collectOne(bridge, item, request, pageSources, imageBudget) {
     const factResponse = await openCli(["browser", session, "eval", DOM_FACTS_SCRIPT], 30_000);
     const facts = factResponse.json && typeof factResponse.json === "object" ? factResponse.json : {};
     const observedAt = now();
-    const dom = domRates(facts);
+    const parsedDom = await parseDomWithScrapling(facts, safeUrl, request.pricing_context);
+    const dom = parsedDom.rows;
     const contextVerified = verifyContext(facts.body, request.pricing_context);
     const matches = matchRates(network, dom);
     const observations = matches.map((match) => observation(
@@ -607,6 +695,7 @@ async function collectOne(bridge, item, request, pageSources, imageBudget) {
       safeUrl,
       observedAt,
       contextVerified,
+      parsedDom.verified,
     ));
     const roomTypes = [...new Set([
       ...dom.map((row) => row.room_name),
@@ -648,6 +737,7 @@ async function collectOne(bridge, item, request, pageSources, imageBudget) {
     if (/登录看低价|请登录/.test(compact(facts.body, 120_000))) collectionIssue = issue("AUTH_REQUIRED", "携程页面要求登录后才能展示同条件价格。", true, candidate.provider_place_id);
     else if (/验证码|安全验证|滑动验证/.test(compact(facts.body, 120_000))) collectionIssue = issue("CAPTCHA_REQUIRED", "携程页面要求人工完成安全验证。", true, candidate.provider_place_id);
     else if (!contextVerified) collectionIssue = issue("QUERY_MISMATCH", "页面未展示与请求一致的入住日期和人数；不会使用页面价格。", true, candidate.provider_place_id);
+    else if (!parsedDom.verified) collectionIssue = issue("DOM_SCHEMA_DRIFT", `携程房型 DOM 未通过版本化 Scrapling 解析：${parsedDom.reason}`, true, candidate.provider_place_id);
     else if (noInventory) collectionIssue = issue("NO_INVENTORY", "已在请求条件下确认该竞品暂无可订房型。", false, candidate.provider_place_id);
     else if (!network.length && !dom.length) collectionIssue = issue("RATE_LOAD_TIMEOUT", "携程页面未返回可识别的房型/报价数据。", true, candidate.provider_place_id);
     else if (network.length && !matches.some((match) => match.price_match)) collectionIssue = issue("PRICE_MISMATCH", "Network 与页面房型报价未形成可验证匹配。", true, candidate.provider_place_id);

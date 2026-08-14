@@ -18,7 +18,7 @@ Use this stateless Skill once per opportunity. Code decides distance, classifica
 - Keep only same-provider GCJ-02, sourced, operating primary-esports lodging within 2km. Do not infer facts or widen range.
 - Pass the full map pool to OTA as `candidate_pool`; its centre, Profile, count and sorted provider-ID hash must return unchanged. Deep OTA/visual research is deterministically capped at **8** properties.
 - ADR needs one `pricing_context`, complete spatial collection and three independent same-workstation medium/high-confidence properties; use CNY-10-rounded median. Never write it into finance automatically.
-- Ego `ctrip-hotel-v1` supplies report-only P1 DOM evidence. Ui.Vision `ctrip-live-rates-v1` can create ADR offers only after exact context, Network/DOM agreement, availability, tax, cancellation and workstation checks. Exact-name Ctrip mapping also requires address-city agreement; an unverified page context is never ADR-eligible.
+- Ego `ctrip-hotel-v1` supplies report-only P1 DOM evidence. Ui.Vision `ctrip-live-rates-v1` can create ADR offers only after the bounded offline Scrapling DOM parser, exact context, Network/DOM agreement, availability, tax, cancellation and workstation checks. Exact-name Ctrip mapping also requires address-city agreement; an unverified page context or parser schema drift is never ADR-eligible.
 - Finance is code-only. JPEG/PNG/WebP visual evidence must bind to a formal `provider_place_id` and is presentation-only. Credentials, Base writeback and state remain with the host. On a new Mac Mini, run `collect_market_evidence.py --preflight --all-engines` and act on its install hints.
 
 ```bash

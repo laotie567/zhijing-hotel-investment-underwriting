@@ -1,0 +1,9 @@
+# Pinned parser-only dependency set.  It deliberately excludes Scrapling
+# fetchers, browser automation, spider, proxy and MCP extras.
+Scrapling==0.4.14
+cssselect==1.5.0
+lxml==6.1.1
+orjson==3.11.9
+tld==0.13.2
+typing_extensions==4.16.0
+w3lib==2.4.1

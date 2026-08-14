@@ -216,6 +216,29 @@ console.log(JSON.stringify(observation(match, {check_in_date:'2026-08-20',nights
         self.assertFalse(value["adr_eligible"])
         self.assertIn("pricing_context_unverified", value["qualification_gaps"])
 
+    def test_unverified_dom_parser_never_marks_a_p2_observation_adr_eligible(self) -> None:
+        """A layout drift may retain legacy text, but cannot retain ADR authority."""
+
+        script = """
+import { networkRates, domRates, matchRates, observation } from './collector/ctrip_live_rates.mjs';
+const network = networkRates({roomName:'双人电竞房 2台电脑',roomId:'room-2',salePrice:328,available:true,cancelPolicy:'免费取消',taxInfo:'含税'}, '/room-list');
+const dom = domRates({room_blocks:[{room_id:'room-2',text:'双人电竞房 2台电脑\\n¥328\\n可订\\n含税\\n免费取消'}]});
+const match = matchRates(network, dom)[0];
+console.log(JSON.stringify(observation(match, {check_in_date:'2026-08-20',nights:1,guests:2,currency:'CNY'}, 'https://hotels.ctrip.com/hotels/detail/?hotelId=1', '2026-08-13T00:00:00Z', true, false)));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        value = json.loads(completed.stdout)
+
+        self.assertFalse(value["adr_eligible"])
+        self.assertIn("dom_parser_unverified", value["qualification_gaps"])
+
     def test_ota_mapping_requires_the_exact_hotel_name_before_city_suffix(self) -> None:
         script = """
 import { mappingName } from './collector/ctrip_live_rates.mjs';

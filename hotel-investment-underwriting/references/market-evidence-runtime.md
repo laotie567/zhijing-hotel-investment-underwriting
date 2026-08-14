@@ -20,7 +20,7 @@ python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
 |---|---|---|
 | `playwright` / `360-map-v1` | 2km 全量地图候选、公开房型/图片 | 在 `collector/` 执行 `npm ci && npx playwright install chromium`。 |
 | `ego-browser` / `ctrip-hotel-v1` | 已登录 OTA 的房型、可订状态、同条件 **P1 页面价格**、酒店/房型图片 | 安装 **Ego Lite**（不是 Eagle），确认 `ego-browser` 命令可用；在 Ego Lite 登录获授权 OTA 后重跑。P1 会交付到 HTML/Base，但不进入 ADR。安装指南：<https://lite.ego.app/document/zh/docs/quick-start>。 |
-| `ctrip-live-rates` / `ctrip-live-rates-v1` | 携程 P1/P2 页面价格、库存、房型、公开图片与 Network/DOM 双证据 | 安装 Google Chrome、OpenCLI Browser Bridge、Ui.Vision 与 `uivision-mcp-bridge@1.1.1`；创建专用 `ctrip-price-worker` Profile 并人工登录携程、完成 Ui.Vision 本机配对。 |
+| `ctrip-live-rates` / `ctrip-live-rates-v1` | 携程 P1/P2 页面价格、库存、房型、公开图片与 Network/DOM 双证据 | 安装 Google Chrome、OpenCLI Browser Bridge、Ui.Vision 与 `uivision-mcp-bridge@1.1.1`；在 `collector/.venv` 安装锁定的 Scrapling 离线解析依赖；创建专用 `ctrip-price-worker` Profile 并人工登录携程、完成 Ui.Vision 本机配对。 |
 | `kimi-webbridge` | 真实浏览器会话的替代页面适配器 | 安装并连接 Kimi WebBridge 浏览器扩展，设置 `MARKET_EVIDENCE_KIMI_WEBBRIDGE_COMMAND`。若预检提示缺失，按 <https://kimi.com/features/webbridge> 安装/连接。 |
 | `crawl4ai` / `xcrawl` / `opencli` | 经批准的静态页、检索或补采适配器 | 安装批准实现，并设置相应 `MARKET_EVIDENCE_*_COMMAND`。 |
 
@@ -69,6 +69,21 @@ python3 scripts/collect_market_evidence.py --preflight --engine ctrip-live-rates
 插件可用。Ui.Vision 运行仓库内固定的刷新宏，
 OpenCLI 仅执行 `bind`、`network` 与只读 `eval`。若 Ui.Vision 未配对、携程未登录、验证码
 出现或报价条件未回显，返回结构化失败原因，绝不回退到 Playwright、Ego Lite 或列表价。
+
+实时价运行前还必须在包内安装解析器；默认会发现 `collector/.venv/bin/python`，也可将一个
+**单一可执行路径**显式设为 `MARKET_EVIDENCE_PARSER_PYTHON`。不能将 shell 命令、浏览器
+或采集器塞入这个变量：它只运行 `scripts/ctrip_dom_parser.py`，输入为最多 1MB 的已观察
+房型 DOM 片段，输出只是后续 Network/DOM 硬校验的候选。Scrapling 不发起网页请求、不读
+Cookie、不持久化自适应数据；当前生产调用只使用版本化主/后备选择器。若页面片段无法由
+`ctrip-element-registry/v1` 解析，回执为 `DOM_SCHEMA_DRIFT`，保留页面观察但拒绝 ADR。
+
+```bash
+cd collector
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r requirements-scrapling.txt
+cd ..
+python3 scripts/collect_market_evidence.py --preflight --engine ctrip-live-rates
+```
 
 ## Hermes 调用
 
