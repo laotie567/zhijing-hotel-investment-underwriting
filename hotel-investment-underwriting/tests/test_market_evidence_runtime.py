@@ -79,6 +79,60 @@ class MarketEvidenceRuntimeTests(unittest.TestCase):
 
         self.assertEqual(["opencli", "ctrip", "search", "--help"], run.call_args.args[0])
 
+    def test_ctrip_opencli_profile_must_be_named_connected_and_default(self) -> None:
+        completed = market_evidence_runtime.subprocess.CompletedProcess(
+            args=["opencli", "profile", "list"],
+            returncode=0,
+            stdout=(
+                "Connected Browser Bridge profiles\n\n"
+                "  profile-b ctrip-price-worker default — connected v1.0.22\n"
+            ),
+        )
+        with patch.object(market_evidence_runtime.subprocess, "run", return_value=completed) as run:
+            self.assertTrue(market_evidence_runtime._ctrip_opencli_profile_ready("opencli"))
+
+        self.assertEqual(["opencli", "profile", "list"], run.call_args.args[0])
+
+    def test_ctrip_opencli_profile_rejects_a_second_connected_browser_bridge(self) -> None:
+        completed = market_evidence_runtime.subprocess.CompletedProcess(
+            args=["opencli", "profile", "list"],
+            returncode=0,
+            stdout=(
+                "Connected Browser Bridge profiles\n\n"
+                "  profile-a developer-chrome-default — connected v1.0.22\n"
+                "  profile-b ctrip-price-worker default — connected v1.0.22\n"
+            ),
+        )
+        with patch.object(market_evidence_runtime.subprocess, "run", return_value=completed):
+            self.assertFalse(market_evidence_runtime._ctrip_opencli_profile_ready("opencli"))
+
+    def test_ctrip_opencli_profile_ignores_a_disconnected_other_profile(self) -> None:
+        completed = market_evidence_runtime.subprocess.CompletedProcess(
+            args=["opencli", "profile", "list"],
+            returncode=0,
+            stdout=(
+                "Connected Browser Bridge profiles\n\n"
+                "  profile-a developer-chrome-default — disconnected\n"
+                "  profile-b ctrip-price-worker default — connected v1.0.22\n"
+            ),
+        )
+        with patch.object(market_evidence_runtime.subprocess, "run", return_value=completed):
+            self.assertTrue(market_evidence_runtime._ctrip_opencli_profile_ready("opencli"))
+
+    def test_ctrip_preflight_declares_same_process_live_handshake(self) -> None:
+        parser = {"state": "ready", "summary": "parser ready"}
+        with patch.object(market_evidence_runtime.Path, "exists", return_value=True), patch.object(
+            market_evidence_runtime.Path, "is_file", return_value=True
+        ), patch.object(market_evidence_runtime.shutil, "which", return_value="/tmp/tool"), patch.object(
+            market_evidence_runtime, "_ctrip_opencli_profile_ready", return_value=True
+        ), patch.object(market_evidence_runtime, "_ctrip_search_plugin_ready", return_value=True), patch.object(
+            market_evidence_runtime, "_ctrip_dom_parser_status", return_value=parser
+        ):
+            result = market_evidence_runtime._ctrip_live_rates_status()
+
+        self.assertEqual("ready", result["state"])
+        self.assertTrue(result["details"]["uivision_live_handshake"]["required"])
+
     def test_ctrip_dom_parser_preflight_requires_a_local_python310_scrapling_runtime(self) -> None:
         with patch.object(market_evidence_runtime, "_ctrip_dom_parser_python", return_value="/tmp/python"), patch.object(
             market_evidence_runtime.subprocess,

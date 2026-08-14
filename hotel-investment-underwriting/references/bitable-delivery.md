@@ -16,7 +16,7 @@ database. An authorised Feishu host applies the manifest to a standard Base.
 | `情景与敏感性` | Existing scenario and sensitivity outputs. |
 | `房型配置` | Existing room-type mix, workstation count, ADR/RevPAR/OCC and traditional baseline fields. |
 | `2km竞品` | Formal and excluded candidates, distance, source facts, optional market-profile facts, plus deterministic deep-research benchmark rank/reason when selected. |
-| `竞品报价与视觉证据` | Formal-competitor offers, shared pricing context, renovation observations and selected room-image evidence. |
+| `竞品报价与视觉证据` | Formal-competitor page room-type observations, offers, shared pricing context, renovation observations and selected room-image evidence. |
 
 The Base uses values, text, select, attachment and record-link fields only.
 It deliberately has no formula or lookup field: `calculate.py` remains the
@@ -24,7 +24,7 @@ only finance/calculation owner.
 
 ## Empty-table prevention and delivery gate
 
-Manifest `1.1` never serializes the three decision-facing tabs as silent empty
+Manifest `1.2` never serializes the three decision-facing tabs as silent empty
 arrays. Each now has `交付状态`; the project summary also has `交付完整性` and
 `交付待补项`.
 
@@ -66,6 +66,11 @@ review count and surroundings. It is neither a 2km-classification fact nor a
 financial input. Its exact validation rules are in
 `schemas/skill-request.schema.json`.
 
+`competitor_analysis.candidates[].room_type_evidence` 是 OTA 页面已观察到的房型名称及其
+来源 ID、URL、采集时间。它以“房型观察”记录写入 `竞品报价与视觉证据`，不包含价格、机位、
+税费或可订承诺，也不参与 ADR 或财务模型。宿主迁移已有模板时必须保留 `证据类型` 的既有选项并
+增补“房型观察”。
+
 For the at-most-eight `benchmark_selected` competitors, the map Profile also
 emits `benchmark_rank` and `benchmark_selection_reason`. These fields describe
 the fixed public-evidence ordering (room photo, disclosed room types,
@@ -91,7 +96,7 @@ competitor classification, ADR eligibility or finance.
    `data_uri` to the named attachment field. Do not download `source_url` or
    treat it as an image payload; it is a traceability link only. After a
    successful upload, set `附件状态` to `status_after_upload`.
-5. Before writing, verify or migrate the `1.1` fields: summary
+5. Before writing, verify or migrate the `1.2` fields: summary
    `交付完整性`/`交付待补项`, child-table `交付状态`, and the full
    `2km竞品` / `竞品报价与视觉证据` field definitions. After writeback, read every
    manifest record key, record-link and attachment count back. For an eligible manifest, only then update the

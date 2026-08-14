@@ -83,6 +83,22 @@
                   }
                 }
               },
+              "room_type_evidence": {
+                "type": "array",
+                "maxItems": 30,
+                "description": "OTA 页面可见的房型名称；仅供竞品调研展示，不构成报价或 ADR 样本。",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["room_type", "room_type_provider_id", "source_url", "observed_at"],
+                  "properties": {
+                    "room_type": {"type": "string", "minLength": 1, "maxLength": 300},
+                    "room_type_provider_id": {"type": "string", "minLength": 1, "maxLength": 240},
+                    "source_url": {"type": "string", "format": "uri"},
+                    "observed_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              },
               "benchmark_selected": {"type": "boolean"},
               "benchmark_rank": {"type": "integer", "minimum": 1, "maximum": 8},
               "benchmark_selection_reason": {"type": "string", "minLength": 1, "maxLength": 500},

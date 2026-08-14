@@ -12,7 +12,7 @@
 | 页面采集回执 | 引擎、Profile、页面 URL/HTTP 状态、采集时间、全量候选/标杆集/房型/图片/报价覆盖度 | Playwright、Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl 或 OpenCLI 的显式 Profile |
 | `project_input` | 合同、房型、收入、成本和财务假设 | 项目团队、合同、报价、经确认的经营资料 |
 | `competitor_analysis.confirmed_location` | 2km 分析中心 | 已授权地图能力 |
-| `competitor_analysis.candidates` | 电竞竞品候选与报价观察 | 已授权地图/证据采集或人工核验 |
+| `competitor_analysis.candidates` | 电竞竞品候选、页面房型观察与报价观察 | 已授权地图/证据采集或人工核验 |
 | `competitor_analysis.collection_status` | 候选集是否已完成定义内的采集 | 执行采集的宿主 |
 | `spatial_collection` / OTA 请求的 `candidate_pool` | 地图阶段完成的精确 2km 候选集合（中心、来源 Profile、数量及排序地点 ID SHA-256） | 地图 Profile；OTA Profile 只能原样回传 |
 | `competitor_analysis.pricing_context` | 同批报价的入住日期、晚数、人数和币种 | 已授权报价采集或人工核验 |
@@ -75,7 +75,7 @@ Skill 使用未舍入 Haversine 距离判断 `0 <= distance_meters <= 2000`。�
 - `conclusion_scope`：宿主必须读取的整体结论范围；只有 2km 空间证据未完成时为 `pre_evaluation_only`；
 - `input_sha256`、`defaults_sha256` 和 `skill_version`：轻量追溯字段；后者来自发布包内的 `VERSION`。
 
-选择 `--format html` 时，标准输出是一份独立的竞品调研 HTML：含 2km 范围、完成状态、正式竞品房型/报价、可选装修观察与图片形成的视觉竞品对标区、ADR 表、排除候选、核心结果已计算的投资回报与按月回本表，以及与投资测算的衔接。`pre_evaluation_only` 会在报告中显式保留，不能被渲染成正式竞品结论。
+选择 `--format html` 时，标准输出是一份独立的竞品调研 HTML：含 2km 范围、完成状态、正式竞品的页面房型观察（非报价）、房型/报价、可选装修观察与图片形成的视觉竞品对标区、ADR 表、排除候选、核心结果已计算的投资回报与按月回本表，以及与投资测算的衔接。`pre_evaluation_only` 会在报告中显式保留，不能被渲染成正式竞品结论。
 
 选择 `--format bitable` 时，标准输出是一份 Feishu Bitable 交付清单。它含模板、按逻辑记录键组织的八张表记录、待解析的记录关联以及待上传的内嵌图片字节；不含 Base token、用户身份、API 调用、公式或远程抓取规则。`项目测算总表.结论范围` 保留与 `conclusion_scope` 相同的值。完整模板与宿主写入顺序见 `references/bitable-delivery.md`。
 

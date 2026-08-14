@@ -1,6 +1,6 @@
 # 智竞未来电竞酒店投测 Skill
 
-当前开发版本：`1.1.0`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统或项目数据库。它包含一个无界面的、可替换引擎的页面市场证据采集工具。
+当前开发版本：`1.1.1`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统或项目数据库。它包含一个无界面的、可替换引擎的页面市场证据采集工具。
 
 它做三件彼此分离的事：
 
@@ -12,7 +12,7 @@
 
 ## 唯一生产发布物
 
-只发布 `hotel-investment-underwriting/`。宿主负责对话、来源账户/密钥、持久化和消息发送；Skill 的 `collect_market_evidence` 通过 Playwright、Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai 或 xcrawl 采集页面证据，但不拥有 UI、登录凭证、数据库或状态系统。
+只发布 `hotel-investment-underwriting/`。宿主负责对话、来源账户/密钥、持久化和消息发送；Mac Mini 的标准生产路径是 **Playwright 建立完整 2km 地图候选池 + Ego Lite 采集至多 8 家标杆的 OTA 房型、图片和 P1 页面证据**。Ui.Vision+OpenCLI 仅是需要 P2 Network/DOM 强校验时才启用的可选扩展；Skill 不拥有 UI、登录凭证、数据库或状态系统。
 
 ```mermaid
 flowchart LR
@@ -34,7 +34,7 @@ flowchart LR
 - 只有点位或全量 2km **空间**证据不完整时，Skill 输出和嵌套财务结果的 `conclusion_scope` 才为 `pre_evaluation_only`。OTA 的图片/价格回执可以是 `partial`，但已完成的空间竞品结论仍可审阅；对应机位 ADR 保持为空，交付清单保留待补项。
 - 财务结果同时给出历史投资表口径的 `static_payback_months`（一次性初投 ÷ 首年平均月经营净现金）和折现持续回本的 `discounted_payback_months`；两者均附向上取整的整月值，不能互相替代。
 - `scripts/collect_market_evidence.py` 是唯一页面采集入口，`scripts/run.py` 是唯一测算入口；`calculate.py` 仅供 Skill 内部调用。
-- 部署到 Mac Mini/Hermes 后先执行 `collect_market_evidence.py --preflight --all-engines`。Ego Lite、Ui.Vision+OpenCLI 或 Kimi WebBridge 未安装、扩展未连接或适配器未配置时，工具给出可展示的安装动作，不会降级或虚构价格。
+- 部署到 Mac Mini/Hermes 后先执行 `collect_market_evidence.py --preflight --engine ego-browser`，并在运行地图池前验证 Playwright。Ego Lite 未安装或未登录时，工具给出可展示的安装动作，不会降级或虚构价格；只有启用可选的携程 P2 实时价时，才检查 Ui.Vision+OpenCLI 与单一 `ctrip-price-worker` Profile。
 
 ## 快速运行
 

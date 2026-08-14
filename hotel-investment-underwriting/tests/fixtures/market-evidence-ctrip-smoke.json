@@ -62,5 +62,20 @@
         "matched_at": "2026-08-13T09:00:00+08:00"
       }
     }
-  ]
+  ],
+  "candidate_pool": {
+    "status": "complete",
+    "source_engine": "playwright",
+    "source_profile": "360-map-v1",
+    "center": {
+      "provider": "360地图",
+      "provider_place_id": "target-place",
+      "coordinate_system": "GCJ-02",
+      "longitude": 104.089545,
+      "latitude": 30.654181,
+      "status": "confirmed"
+    },
+    "candidate_count": 1,
+    "candidate_ids_sha256": "6ee04a47db8f610c02d82339ce6b47a264ca09c12539b910298a7467b544a36f"
+  }
 }

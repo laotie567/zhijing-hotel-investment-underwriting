@@ -243,6 +243,41 @@ class CompetitorAnalysisTests(unittest.TestCase):
         self.assertEqual(260.0, pricing["recommended_adr"])
         self.assertEqual(3, pricing["sample_count"])
 
+    def test_page_room_type_evidence_is_visible_but_never_an_adr_offer(self) -> None:
+        request = complete_input(
+            [
+                candidate("P-1", 104.001, prices=[240]),
+                candidate("P-2", 104.002, prices=[260]),
+                candidate("P-3", 104.003, prices=[280]),
+            ]
+        )
+        request["candidates"][0]["room_type_evidence"] = [
+            {
+                "room_type": "四人电竞大床房",
+                "room_type_provider_id": "P-1:ego-dom:room-type:1",
+                "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                "observed_at": "2026-08-14T10:00:00+08:00",
+            }
+        ]
+
+        result = competitor_analysis.analyze_competitors(request)
+
+        self.assertEqual("complete", result["status"])
+        self.assertEqual(
+            "四人电竞大床房",
+            result["competitors"][0]["room_type_evidence"][0]["room_type"],
+        )
+        self.assertEqual(260.0, result["pricing_by_workstations"][0]["recommended_adr"])
+
+    def test_rejects_untraceable_room_type_evidence_from_a_complete_collection(self) -> None:
+        request = complete_input([candidate("P-1", 104.001, prices=[240])])
+        request["candidates"][0]["room_type_evidence"] = [{"room_type": "无来源房型"}]
+
+        result = competitor_analysis.analyze_competitors(request)
+
+        self.assertEqual("evidence_insufficient", result["status"])
+        self.assertIn("candidate[P-1].room_type_evidence", result["missing_inputs"])
+
     def test_low_confidence_sources_remain_visible_but_do_not_count_toward_adr(self) -> None:
         result = competitor_analysis.analyze_competitors(
             complete_input(

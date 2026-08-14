@@ -17,6 +17,7 @@ _CONFIDENCE_LEVELS = {"low", "medium", "high"}
 _ADR_ELIGIBLE_CONFIDENCE_LEVELS = {"medium", "high"}
 _PRICING_CURRENCY = "CNY"
 _OFFER_AVAILABILITY = {"available", "sold_out", "unknown"}
+_MAX_ROOM_TYPE_EVIDENCE = 30
 
 
 class CompetitorInputError(ValueError):
@@ -134,6 +135,53 @@ def _source_result(value: Any) -> tuple[dict[str, str], list[str]]:
     return {field: str(field_value).strip() for field, field_value in source.items() if isinstance(field_value, str)}, missing
 
 
+def _room_type_evidence_result(value: Any) -> tuple[list[dict[str, str]], bool]:
+    """Keep only page-traceable room-type observations for presentation.
+
+    A room-type name is useful to an operator even when the OTA cannot return a
+    bookable price.  It is deliberately separate from ``room_offers`` so it
+    can never be mistaken for an ADR-eligible offer.
+    """
+
+    if value is None:
+        return [], True
+    if not isinstance(value, list) or len(value) > _MAX_ROOM_TYPE_EVIDENCE:
+        return [], False
+    normalized: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != {
+            "room_type", "room_type_provider_id", "source_url", "observed_at"
+        }:
+            return [], False
+        room_type = item.get("room_type")
+        provider_id = item.get("room_type_provider_id")
+        source_url = item.get("source_url")
+        observed_at = item.get("observed_at")
+        if (
+            not isinstance(room_type, str)
+            or not room_type.strip()
+            or len(room_type.strip()) > 300
+            or not isinstance(provider_id, str)
+            or not provider_id.strip()
+            or len(provider_id.strip()) > 240
+            or not _valid_url(source_url)
+            or not _valid_observed_at(observed_at)
+            or provider_id.strip() in seen_ids
+        ):
+            return [], False
+        seen_ids.add(provider_id.strip())
+        normalized.append(
+            {
+                "room_type": room_type.strip(),
+                "room_type_provider_id": provider_id.strip(),
+                "source_url": source_url.strip(),
+                "observed_at": observed_at.strip(),
+            }
+        )
+    return normalized, True
+
+
 def _pricing_context_result(
     request: Mapping[str, Any],
 ) -> tuple[dict[str, Any] | None, list[str]]:
@@ -200,6 +248,11 @@ def _candidate_result(candidate: Any, center: Mapping[str, Any]) -> dict[str, An
 
     source, source_pending = _source_result(candidate.get("source"))
     pending.extend(source_pending)
+    room_type_evidence, room_type_evidence_valid = _room_type_evidence_result(
+        candidate.get("room_type_evidence")
+    )
+    if not room_type_evidence_valid:
+        pending.append("room_type_evidence")
     property_kind = candidate.get("property_kind")
     esports_positioning = candidate.get("esports_positioning")
     operating_status = candidate.get("operating_status")
@@ -223,6 +276,7 @@ def _candidate_result(candidate: Any, center: Mapping[str, Any]) -> dict[str, An
         "reason_codes": [],
         "pending_fields": pending,
         "source": source,
+        "room_type_evidence": room_type_evidence,
         "room_offers": candidate.get("room_offers") if isinstance(candidate.get("room_offers"), list) else [],
         # P1/P2/P3 observations remain visible to a user even when the strict
         # ADR gate rejects them (for example tax scope or machine-count is not

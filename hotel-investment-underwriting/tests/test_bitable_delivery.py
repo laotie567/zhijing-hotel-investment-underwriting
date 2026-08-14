@@ -220,7 +220,7 @@ class BitableDeliveryTests(unittest.TestCase):
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)
 
-        self.assertEqual("1.1", manifest["manifest_version"])
+        self.assertEqual("1.2", manifest["manifest_version"])
         self.assertEqual("skill_is_calculation_owner", manifest["write_policy"]["calculation_owner"])
         self.assertTrue(manifest["delivery_gate"]["final_delivery_eligible"])
         self.assertEqual(
@@ -288,6 +288,14 @@ class BitableDeliveryTests(unittest.TestCase):
 
     def test_manifest_maps_current_and_historical_competitor_fields_and_media(self) -> None:
         request = self._request()
+        request["competitor_analysis"]["candidates"][0]["room_type_evidence"] = [
+            {
+                "room_type": "双人电竞大床房",
+                "room_type_provider_id": "P-1:ego-dom:room-type:1",
+                "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                "observed_at": "2026-08-14T10:00:00+08:00",
+            }
+        ]
         request["competitor_analysis"]["candidates"][0]["benchmark_selected"] = True
         request["competitor_analysis"]["candidates"][0]["benchmark_rank"] = 1
         request["competitor_analysis"]["candidates"][0]["benchmark_selection_reason"] = (
@@ -310,8 +318,12 @@ class BitableDeliveryTests(unittest.TestCase):
         self.assertEqual("P-1-room-1.png", manifest["attachments"][0]["filename"])
         self.assertEqual("已上传", manifest["attachments"][0]["status_after_upload"])
         self.assertIn("报价", {row["证据类型"] for row in evidence})
+        self.assertIn("房型观察", {row["证据类型"] for row in evidence})
         self.assertIn("价格观察", {row["证据类型"] for row in evidence})
         self.assertIn("视觉", {row["证据类型"] for row in evidence})
+        room_type = next(row for row in evidence if row["证据类型"] == "房型观察")
+        self.assertEqual("双人电竞大床房", room_type["房型"])
+        self.assertTrue(room_type["DOM已验证"])
         observation = next(row for row in evidence if row["证据类型"] == "价格观察")
         self.assertFalse(observation["可进入ADR"])
         self.assertEqual("tax_scope_unknown", observation["ADR排除原因"])

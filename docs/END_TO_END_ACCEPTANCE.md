@@ -16,8 +16,8 @@
 | 阶段 | 选定引擎/Profile | 当次结果 | 结论 |
 |---|---|---|---|
 | 2km 候选 | Playwright / `360-map-v1` | 确认 GCJ-02 中心点、全量候选、`spatial_collection`（中心/数量/ID 指纹） | 可追溯的完整空间候选池 |
-| OTA 标杆 | Ego Lite / `ctrip-hotel-v1` 或 Ui.Vision+OpenCLI / `ctrip-live-rates-v1` | 将**全量**候选作为 `candidate_inventory`，并原样传入 `candidate_pool`；仅最多 8 个已选标杆采集房型/图片/报价 | CLI 验证回传池、引擎/Profile与中心一致；图片可进入 HTML/Base 附件 |
-| 同条件价格 | OTA Profile | 登录、验证码、售罄或页面未回显日期/人数 | 回执可为 `partial`；P1/P2 观察保留，`pricing_context_unverified` 或其他资格缺口不得形成 ADR |
+| OTA 标杆 | **Ego Lite / `ctrip-hotel-v1`（默认）**；可选 Ui.Vision+OpenCLI / `ctrip-live-rates-v1` | 将**全量**候选作为 `candidate_inventory`，并原样传入 `candidate_pool`；仅最多 8 个已选标杆采集房型/图片/报价 | CLI 验证回传池、引擎/Profile与中心一致；图片可进入 HTML/Base 附件 |
+| 同条件价格 | Ego 默认 OTA Profile | 登录、验证码、页面未回显日期/人数或明确无可订房 | 登录/口径缺失为 `partial`；P1 观察保留但不得形成 ADR。`NO_INVENTORY` 是已完成的负向价格结果，ADR 仍保持为空 |
 | 投测和交付 | `run.py` | 基准输入的财务机械、HTML、Bitable manifest | 空间池完整时为 `ready_for_review`；缺价格/图片会保留待补项和空 ADR，不自动改写财务 |
 
 ## 在 Mac Mini 上复现
@@ -29,7 +29,7 @@
    npm ci
    npx playwright install chromium
    cd ..
-   python3 scripts/collect_market_evidence.py --preflight --all-engines
+   python3 scripts/collect_market_evidence.py --preflight --engine ego-browser
    ```
 
 2. 以 `--engine playwright` 提交 `360-map-v1` 请求。保存 `--format result` 的 JSON，
@@ -40,7 +40,7 @@
    `candidate_inventory`，并把原回执 `spatial_collection` 原样填入 `candidate_pool`。
    仅将人工或已授权适配器确认过的地图实体标成 `benchmark_selected`（最多 8 家）；
    对 `ctrip-hotel-v1`，为每一个标杆添加稳定 `ota_property.property_id`、URL、匹配方式
-   及时间；`ctrip-live-rates-v1` 只允许名称与地址城市均唯一精确的自动映射。以相应引擎运行。
+   及时间；标准链路以 `ego-browser` 运行。只有启用可选 P2 的 `ctrip-live-rates-v1` 时，才允许名称与地址城市均唯一精确的自动映射。
 
 4. 将 OTA 采集结果作为 `market_evidence` 与项目财务输入组装，并分别运行：
 
@@ -66,9 +66,9 @@
   此时可审阅正式竞品集合。
 - **通过 ADR 参考**：在空间结论基础上，标杆集的同条件价格满足严格 P2 资格，且同机位
   有至少三家独立中/高置信度正式竞品的同条件可订报价。
-- **价格被登录、验证码、售罄或页面条件缺失阻断**：保留已取得的候选/图片，采集回执
-  为 `partial`，ADR 保持不可用；若空间池完整，仍为 `ready_for_review` 并在交付物中列出
-  缺口。管理员完成正常登录后重跑；不得将列表价、不同日期价或模型猜测写入 ADR。
+- **价格被登录、验证码或页面条件缺失阻断**：保留已取得的候选/图片，采集回执为
+  `partial`，ADR 保持不可用；若空间池完整，仍为 `ready_for_review` 并在交付物中列出缺口。管理员完成正常登录后重跑；不得将列表价、不同日期价或模型猜测写入 ADR。
+- **明确售罄/不接受预订**：记录 `NO_INVENTORY`、当前价格条件与页面来源。这是完成的负向采集结果，不以附近酒店列表价替代，也不生成 ADR。
 
 ## 交付物与留存
 

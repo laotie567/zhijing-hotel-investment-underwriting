@@ -27,6 +27,15 @@ function coverage(status, observed_count, notes) {
   return { status, observed_count, ...(notes ? { notes } : {}) };
 }
 
+function issue(code, message, retryable, providerPlaceId) {
+  return {
+    code,
+    message: text(message, 500),
+    retryable: Boolean(retryable),
+    ...(providerPlaceId ? { provider_place_id: providerPlaceId } : {}),
+  };
+}
+
 function addNights(checkInDate, nights) {
   const start = new Date(`${checkInDate}T00:00:00Z`);
   start.setUTCDate(start.getUTCDate() + Number(nights));
@@ -100,6 +109,7 @@ function buildBaseResult(request, startedAt, pageSources) {
       pricing: coverage("failed", 0),
     },
     collection_gaps: [],
+    collection_issues: [],
     competitor_analysis: {
       confirmed_location: request.target.center || null,
       collection_status: "partial",
@@ -166,10 +176,10 @@ function extractPageFacts(maxImages) {
       title: document.title,
       has_login_price_gate: body.includes('登录看低价'),
       page_context_text: contextText.slice(0, 3000),
-      room_type_names: [...new Set([
-        ...roomPriceCards.map((card) => card.room_type),
-        ...rawBody.split(/\n/).map((line) => compact(line, 240)).filter((line) => line.includes('房') && /电竞|大床|双床|套房/.test(line)),
-      ])].slice(0, 30),
+      // A room-type observation must originate in a structured bookable-room
+      // card.  Do not scrape arbitrary page prose: hotel features, summaries
+      // and guest reviews often contain words such as “套房” or “电竞房”.
+      room_type_names: [...new Set(roomPriceCards.map((card) => card.room_type))].slice(0, 30),
       images,
       room_price_cards: roomPriceCards,
     };
@@ -237,10 +247,12 @@ const candidates = inventory.map((item) => ({
 const candidateById = new Map(candidates.map((candidate) => [candidate.provider_place_id, candidate]));
 const media = [];
 const gaps = [];
+const collectionIssues = [];
 let imageCount = 0;
 let roomTypeCount = 0;
 let pricedCandidateCount = 0;
 let observedPriceCandidateCount = 0;
+let noInventoryCandidateCount = 0;
 let embeddedBytes = 0;
 
 for (const item of selected) {
@@ -270,7 +282,15 @@ for (const item of selected) {
       observed_at: observedAt,
       page_title: text(facts.title, 300),
     }];
-    roomTypeCount += Array.isArray(facts.room_type_names) ? facts.room_type_names.length : 0;
+    candidate.room_type_evidence = (Array.isArray(facts.room_type_names) ? facts.room_type_names : [])
+      .map((roomType, index) => ({
+        room_type: text(roomType, 300),
+        room_type_provider_id: `${ota.property_id}:ego-dom:room-type:${index + 1}`,
+        source_url: bookingUrl,
+        observed_at: observedAt,
+      }))
+      .filter((item) => item.room_type);
+    roomTypeCount += candidate.room_type_evidence.length;
     const pricingObservations = requestedContextVisible
       ? pagePriceObservations(
         facts.room_price_cards,
@@ -287,6 +307,9 @@ for (const item of selected) {
     candidate.pricing_observations = pricingObservations;
     if (candidate.room_offers.length) pricedCandidateCount += 1;
     if (pricingObservations.length) observedPriceCandidateCount += 1;
+    const noInventory = /本酒店目前不接受预订|暂不接受预订|暂无可订房|当前无可订房型/.test(
+      facts.page_context_text,
+    );
     const images = [];
     for (const image of Array.isArray(facts.images) ? facts.images : []) {
       const collected = await fetchImage(image.url, pageSources, MAX_EMBEDDED_BYTES - embeddedBytes);
@@ -312,15 +335,51 @@ for (const item of selected) {
     }
     if (facts.has_login_price_gate) {
       gaps.push(`${candidate.name || candidate.provider_place_id}：OTA 页面要求登录后展示同条件价格；请在 Ego Lite 登录后重试`);
+      collectionIssues.push(issue(
+        "AUTH_REQUIRED",
+        "携程页面要求登录后才能展示同条件价格。",
+        true,
+        candidate.provider_place_id,
+      ));
     }
     if (!requestedContextVisible) {
       gaps.push(
         `${candidate.name || candidate.provider_place_id}：OTA 页面未确认请求报价条件（${request.pricing_context.check_in_date}、${request.pricing_context.nights}晚、${request.pricing_context.guests}成人）；不得读取价格`
       );
+      collectionIssues.push(issue(
+        "QUERY_MISMATCH",
+        "携程页面未展示与请求一致的入住日期、晚数和人数；不会使用页面价格。",
+        true,
+        candidate.provider_place_id,
+      ));
+    } else if (noInventory) {
+      // An explicit no-booking state is a completed negative observation, not
+      // a missing price. Keep ADR empty while allowing the collection receipt
+      // to distinguish it from a selector/layout failure.
+      noInventoryCandidateCount += 1;
+      collectionIssues.push(issue(
+        "NO_INVENTORY",
+        "已在请求条件下确认该竞品目前不接受预订或无可订房型。",
+        false,
+        candidate.provider_place_id,
+      ));
+    } else if (!pricingObservations.length && !facts.has_login_price_gate) {
+      collectionIssues.push(issue(
+        "RATE_LOAD_TIMEOUT",
+        "携程页面已回显报价条件，但未返回可识别的房型价格卡片。",
+        true,
+        candidate.provider_place_id,
+      ));
     }
   } catch (error) {
     pageSources.push({ url: bookingUrl, status: 599 });
     gaps.push(`${candidate.name || candidate.provider_place_id}：OTA 页面采集失败（${text(String(error), 240)}）`);
+    collectionIssues.push(issue(
+      "RPA_FAILED",
+      `携程页面采集失败：${text(String(error), 240)}`,
+      true,
+      candidate.provider_place_id,
+    ));
   }
 }
 
@@ -328,8 +387,9 @@ if (!inventory.length) gaps.push("Ego OTA Profile requires candidate_inventory f
 if (!selected.length && inventory.length) gaps.push("未选择任何价格/视觉标杆；请提供带 ota_property 的 benchmark_selected 候选");
 if (request.required_evidence.room_types && roomTypeCount === 0) gaps.push("已选标杆未取得可追溯房型名称");
 if (request.required_evidence.images && media.length < selected.length) gaps.push(`标杆图片未完整采集：${media.length}/${selected.length} 家`);
-if (request.required_evidence.pricing && observedPriceCandidateCount < selected.length) {
-  gaps.push(`同条件页面价格观察未完整采集：${observedPriceCandidateCount}/${selected.length} 家`);
+const pricingResolvedCandidateCount = observedPriceCandidateCount + noInventoryCandidateCount;
+if (request.required_evidence.pricing && pricingResolvedCandidateCount < selected.length) {
+  gaps.push(`同条件页面价格观察或无房结论未完整采集：${pricingResolvedCandidateCount}/${selected.length} 家`);
 }
 if (observedPriceCandidateCount > 0 && pricedCandidateCount < observedPriceCandidateCount) {
   gaps.push("已保存携程 P1 页面价格观察；缺少 Network 双证据、税费口径或机位数，暂不得计入 ADR。");
@@ -344,12 +404,15 @@ result.coverage = {
   room_types: coverage(roomTypeCount ? "complete" : "failed", roomTypeCount),
   images: coverage(media.length === selected.length && selected.length ? "complete" : "partial", imageCount),
   pricing: coverage(
-    pricedCandidateCount === selected.length && selected.length ? "complete" : "partial",
-    observedPriceCandidateCount,
-    observedPriceCandidateCount > pricedCandidateCount ? "包含仅展示、未进入 ADR 的 P1 页面价格观察" : undefined,
+    noInventoryCandidateCount === selected.length && selected.length ? "complete" : "partial",
+    pricingResolvedCandidateCount,
+    noInventoryCandidateCount
+      ? "包含已确认无可订房型的负向价格结果；不会生成 ADR"
+      : (observedPriceCandidateCount > pricedCandidateCount ? "包含仅展示、未进入 ADR 的 P1 页面价格观察" : undefined),
   ),
 };
 result.collection_gaps = gaps;
+result.collection_issues = collectionIssues;
 // The incoming inventory is the already bounded 2km map pool.  A full pool
 // remains a completed spatial analysis even if live OTA rates are partial or
 // only P1; this preserves valid competitor and visual research while the ADR

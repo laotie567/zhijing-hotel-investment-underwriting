@@ -27,7 +27,7 @@ git archive --format=zip --output hotel-investment-underwriting-vX.Y.Z.zip \
 
 - Python 3.10+；核心测算只依赖标准库。选择 `ctrip-live-rates` 时，另在项目本地虚拟环境中安装锁定的 Scrapling **解析器依赖**；它不含浏览器、抓取器、代理或凭证处理；
 - 页面证据采集默认需要 Node 20+、`collector/package-lock.json` 和 Chromium；安装命令见 `references/market-evidence-collection.md`；
-- Mac Mini/Hermes 在首次运行前必须执行 `python3 scripts/collect_market_evidence.py --preflight --all-engines`；Ego Lite、Ui.Vision+OpenCLI、OpenCLI Ctrip 搜索命令或 Kimi WebBridge 未安装/未连接时，按输出的 `install_hint` 安装并重启 Hermes。Ego Lite 与 Ui.Vision+OpenCLI 仅用于本机 macOS 认证页面会话，不替代云端采集器；
+- Mac Mini/Hermes 的默认验收先执行 `python3 scripts/collect_market_evidence.py --preflight --engine ego-browser`；地图池另按 Playwright 安装要求验收。Ego Lite 未安装/未登录时，按输出的 `install_hint` 处理并重启 Hermes。Ui.Vision+OpenCLI、OpenCLI Ctrip 搜索命令或 Kimi WebBridge 只在宿主显式启用对应可选 Profile 时才需预检；Ego Lite 与可选扩展都仅用于本机 macOS 认证页面会话，不替代云端采集器；
 - 宿主安全注入已授权页面来源会话/凭证；Skill 不读取或保存凭证；
 - 宿主按需要保存请求、结果和发送消息；Skill 不要求数据库、持久状态目录或守护进程。`ctrip-live-rates` 仅在单次运行期间创建并删除临时浏览器互斥锁。
 
@@ -39,19 +39,17 @@ git archive --format=zip --output hotel-investment-underwriting-vX.Y.Z.zip \
 cd hotel-investment-underwriting/collector
 npm ci
 npx playwright install chromium
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -r requirements-scrapling.txt
 cd ..
-python3 scripts/collect_market_evidence.py --preflight --all-engines
+python3 scripts/collect_market_evidence.py --preflight --engine playwright
+python3 scripts/collect_market_evidence.py --preflight --engine ego-browser
 ```
 
 `preflight` 不会自动安装浏览器扩展、读取 Cookie 或尝试登录。仅当本次选用的引擎为
 `ready` 才能采集：缺少 **Ego Lite** 时按 `install_hint` 安装、完成其 onboarding 后重启
-Hermes；使用 Kimi WebBridge 时还必须安装并连接扩展、再设置
-`MARKET_EVIDENCE_KIMI_WEBBRIDGE_COMMAND`。未选用的 crawl4ai、xcrawl、OpenCLI
-适配器可以保持 `action_required`，不会妨碍已就绪的 Playwright/Ego Lite 链路。
+Hermes。Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl 等可选扩展可以保持
+`action_required`，不会妨碍已就绪的 Playwright/Ego Lite 标准链路。
 
-如选择携程实时价 Profile，则需要单独的 Chrome `ctrip-price-worker` Profile，并在该
+如需 P2 强校验而选择**可选**的携程实时价 Profile，才需要单独的 Chrome `ctrip-price-worker` Profile，并在该
 Profile 中安装 OpenCLI Browser Bridge 和 Ui.Vision；管理员正常登录携程、完成验证码和
 Ui.Vision 的本机配对。再安装固定 Bridge 版本：
 
@@ -60,25 +58,30 @@ npm install -g uivision-mcp-bridge@1.1.1
 python3 scripts/collect_market_evidence.py --preflight --engine ctrip-live-rates
 ```
 
+当前 OpenCLI 的 `browser … bind` 在同时连接多个 Browser Bridge Profile 时会拒绝选择标签页。
+因此实时价 Worker 的硬性前提是：**仅** `ctrip-price-worker` 启用并连接 OpenCLI Browser
+Bridge，且执行 `opencli profile use ctrip-price-worker`；在其他 Chrome Profile 中禁用该扩展。
+预检会在打开携程页之前验证这一条件，并给出可执行的 `install_hint`。
+
 实时价采集严格由 Ui.Vision 改变页面状态、OpenCLI 只读 Network/DOM，Scrapling 只离线解析一个受大小限制的已观察房型 DOM 片段；预检还验证本机
 `opencli ctrip search --help`，以保证自动映射所需的 Ctrip 命令真实可用。回执不含 Cookie、
 请求头、令牌或原始响应 body。未登录、验证码、房源映射歧义、无库存和页面结构变动（`DOM_SCHEMA_DRIFT`）会
 返回明确的 `collection_issues`，而非静默写入空报价或伪 ADR。
 
-生产宿主只调用 CLI 或只监听本机的 HTTP 接口，绝不将浏览器操作转嫁给 Codex
-Computer Use：
+生产宿主以 Playwright 地图池与 Ego Lite OTA Profile 作为标准链路，只调用 CLI 或只监听本机的 HTTP 接口，绝不将浏览器操作转嫁给 Codex Computer Use：
 
 ```bash
 python3 scripts/collect_market_evidence.py \
   --engine ego-browser --serve 127.0.0.1:8791
 ```
 
-Ego Lite 登录态仅驻留在这台 Mac Mini。若 OTA 显示“登录看低价”、验证码或售罄，采集器
-返回 `partial`；管理员在 Ego Lite 完成正常登录后重跑相同请求，不能以无口径列表价替代。
+Ego Lite 登录态仅驻留在这台 Mac Mini。若 OTA 显示“登录看低价”或验证码，采集器返回
+`partial`；若明确售罄/不接受预订，则写入 `NO_INVENTORY`，其整体状态仍由房型、图片等其余
+覆盖度决定。管理员在 Ego Lite 完成正常登录后重跑相同请求，不能以无口径列表价替代。
 
 ## 宿主调用顺序
 
-1. 先用 `360-map-v1` 采集中心点和全量同源 2km 候选，保存回执中的 `spatial_collection`；再把**全量**候选和这份原样 `candidate_pool` 交给 `ctrip-hotel-v1` 或 `ctrip-live-rates-v1`。前者要求显式 OTA 实体映射；后者只接受名称与地址城市都唯一精确的携程搜索映射。OTA 回执必须原样返回该池，且运行器拒绝引擎/Profile/中心/候选指纹不匹配。
+1. 标准路径先用 `360-map-v1` 采集中心点和全量同源 2km 候选，保存回执中的 `spatial_collection`；再把**全量**候选和这份原样 `candidate_pool` 交给 Ego `ctrip-hotel-v1`。该 Profile 要求显式 OTA 实体映射；只有显式启用的 P2 扩展 `ctrip-live-rates-v1` 才可按名称+城市唯一精确地自动映射。OTA 回执必须原样返回该池，且运行器拒绝引擎/Profile/中心/候选指纹不匹配。
 2. `competitor_analysis.collection_status=complete` 只表示全量 2km 空间候选已被证明完成。房型、图片、同条件报价的 `partial` 仍使**采集回执**为 `partial`，阻止 ADR 或完整交付，但不会把已完成的空间竞品集合降级为未完成。
 3. 把 `--format skill-patch` 输出与项目财务输入组装为统一请求并调用 `scripts/run.py`。
 4. 先读取 `workflow.status`，再展示竞品和财务结果。

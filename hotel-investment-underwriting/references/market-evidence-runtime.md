@@ -6,11 +6,14 @@ Codex Computer Use；Hermes、OpenAI Agent 或其他宿主只需调用该命令�
 
 ## 先做预检
 
-在新 Mac Mini 的仓库根目录执行：
+在新 Mac Mini 的仓库根目录，先验收默认 OTA Profile：
 
 ```bash
 python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
-  --preflight --all-engines
+  --preflight --engine ego-browser
+
+python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
+  --preflight --engine playwright
 ```
 
 输出的 `state` 只有 `ready` 才可运行相应引擎。`action_required` 必须按
@@ -19,13 +22,14 @@ python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
 | 引擎/Profile | 适用证据 | Mac Mini 预检与动作 |
 |---|---|---|
 | `playwright` / `360-map-v1` | 2km 全量地图候选、公开房型/图片 | 在 `collector/` 执行 `npm ci && npx playwright install chromium`。 |
-| `ego-browser` / `ctrip-hotel-v1` | 已登录 OTA 的房型、可订状态、同条件 **P1 页面价格**、酒店/房型图片 | 安装 **Ego Lite**（不是 Eagle），确认 `ego-browser` 命令可用；在 Ego Lite 登录获授权 OTA 后重跑。P1 会交付到 HTML/Base，但不进入 ADR。安装指南：<https://lite.ego.app/document/zh/docs/quick-start>。 |
-| `ctrip-live-rates` / `ctrip-live-rates-v1` | 携程 P1/P2 页面价格、库存、房型、公开图片与 Network/DOM 双证据 | 安装 Google Chrome、OpenCLI Browser Bridge、Ui.Vision 与 `uivision-mcp-bridge@1.1.1`；在 `collector/.venv` 安装锁定的 Scrapling 离线解析依赖；创建专用 `ctrip-price-worker` Profile 并人工登录携程、完成 Ui.Vision 本机配对。 |
+| `ego-browser` / `ctrip-hotel-v1` | **Mac Mini 默认 OTA Profile**：已登录 OTA 的房型、可订状态、同条件 **P1 页面价格/无房结论**、酒店/房型图片 | 安装 **Ego Lite**（不是 Eagle），确认 `ego-browser` 命令可用；在 Ego Lite 登录获授权 OTA 后重跑。P1 会交付到 HTML/Base，但不进入 ADR。安装指南：<https://lite.ego.app/document/zh/docs/quick-start>。 |
+| `ctrip-live-rates` / `ctrip-live-rates-v1` | 可选 P2 扩展：携程页面价格、库存、房型、公开图片与 Network/DOM 双证据 | 仅在需要 P2 时安装 Google Chrome、OpenCLI Browser Bridge、Ui.Vision 与 `uivision-mcp-bridge@1.1.1`；在 `collector/.venv` 安装锁定的 Scrapling 离线解析依赖；创建专用 `ctrip-price-worker` Profile 并人工登录携程、完成 Ui.Vision 本机配对。**只能有这一个**已连接的 OpenCLI Browser Bridge Profile，并将其设为 default。 |
 | `kimi-webbridge` | 真实浏览器会话的替代页面适配器 | 安装并连接 Kimi WebBridge 浏览器扩展，设置 `MARKET_EVIDENCE_KIMI_WEBBRIDGE_COMMAND`。若预检提示缺失，按 <https://kimi.com/features/webbridge> 安装/连接。 |
 | `crawl4ai` / `xcrawl` / `opencli` | 经批准的静态页、检索或补采适配器 | 安装批准实现，并设置相应 `MARKET_EVIDENCE_*_COMMAND`。 |
 
 预检不安装软件、不读取 Cookie、不打开页面。Hermes 应在首次部署、升级浏览器/扩展
-或 Profile 后主动运行一次，并把 `install_hint` 原样展示给管理员。
+或 Profile 后主动运行一次：标准链路只检查 Playwright 和 Ego Lite；只有配置可选引擎时才检查其
+依赖，并把 `install_hint` 原样展示给管理员。
 
 ## 受控的两阶段采集
 
@@ -48,13 +52,21 @@ python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
 `ctrip-hotel-v1` 在页面同时回显房型、可订、最终展示价、取消文案和完全相同的
 `pricing_context` 时，写入 P1 `pricing_observations`。P1 是真实的 DOM 页面证据，但该
 Profile 不读取 Network 载荷，也不猜测税费口径或机位数，因此永远不写入 `room_offers` 或
-ADR。未登录显示“登录看低价”、验证码、售罄或页面字段缺失都会产生 `partial`；不会用列表价替代。
+ADR。未登录显示“登录看低价”、验证码或页面字段缺失都会产生 `partial`；明确显示售罄、无房或
+“不接受预订”则写入非重试 `NO_INVENTORY`，是已完成的负向价格结果。两种情形都不会用列表价替代。
 
-### 携程实时价 Worker
+若详情页展示结构化的可订房型卡片，Ego 会把房型名称以 `room_type_evidence` 写回：每条均带
+房型来源 ID、详情页 URL 和带时区采集时间。酒店简介、特色标签、评论和附近酒店列表中的“房”字
+不会被当作房型；无房页面因而可能保留图片却没有房型观察，并如实返回待补。该证据只服务于
+HTML/飞书竞品调研展示，绝不等同于 `room_offers`、不会形成 ADR 样本，也不会改写财务假设。
+
+### 可选：携程 P2 实时价 Worker
 
 在 `ctrip-price-worker` Chrome Profile 中只安装并启用 OpenCLI Browser Bridge 和
 Ui.Vision。携程账户由管理员在这个 Profile 内正常登录；Skill、Hermes 与任何 Agent
-都不接收密码、Cookie 或验证码。然后安装固定版本 Bridge：
+都不接收密码、Cookie 或验证码。OpenCLI 当前无法在多个已连接的 Browser Bridge Profile
+之间可靠选定当前标签：在其他 Chrome Profile 禁用 Browser Bridge，只保留本 Profile，然后执行
+`opencli profile use ctrip-price-worker`。然后安装固定版本 Bridge：
 
 ```bash
 npm install -g uivision-mcp-bridge@1.1.1
@@ -62,7 +74,8 @@ python3 scripts/collect_market_evidence.py --preflight --engine ctrip-live-rates
 ```
 
 首次配对时，管理员按 Ui.Vision 本机设置完成 MCP Bridge 的 `127.0.0.1` 配对，并保持
-侧边栏开启。采集器为单任务 Worker：临时互斥锁防止两个 Hermes 任务同时操作同一
+侧边栏开启。预检必须显示 `ready` 才会开始页面动作；若显示多个 Profile，只按其 `install_hint`
+禁用其他 Profile 的 Browser Bridge 后重试。采集器为单任务 Worker：临时互斥锁防止两个 Hermes 任务同时操作同一
 浏览器页面；锁在任务退出后删除，记录进程已不存在时才自动回收；只有没有有效 PID 的
 异常锁才按 12 分钟过期回收，不保存项目状态。预检同时检查无副作用的
 `opencli ctrip search --help`，保证自动映射

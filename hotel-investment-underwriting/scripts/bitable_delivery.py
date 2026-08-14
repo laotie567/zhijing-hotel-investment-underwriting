@@ -16,7 +16,7 @@ import calculate
 import competitor_report
 
 
-MANIFEST_VERSION = "1.1"
+MANIFEST_VERSION = "1.2"
 BASE_NAME = "智竞酒店投资分析交付"
 _DELIVERY_COMPLETENESS = ("待写入核验", "可交付", "待补证据")
 _DELIVERY_RECORD_STATUSES = (
@@ -305,7 +305,7 @@ def standard_template() -> dict[str, Any]:
                 _link("关联项目运行", "项目测算总表"),
                 _link("关联竞品", "2km竞品"),
                 _select("交付状态", _DELIVERY_RECORD_STATUSES),
-                _select("证据类型", ("报价", "价格观察", "视觉")),
+                _select("证据类型", ("房型观察", "报价", "价格观察", "视觉")),
                 _text("竞品记录ID"),
                 _text("竞品名称"),
                 _text("OTA平台"),
@@ -970,6 +970,29 @@ def _evidence_records(
             and isinstance(candidate.get("booking_evidence")[0], Mapping)
             else {}
         )
+        for index, room_type in enumerate(candidate.get("room_type_evidence", []), start=1):
+            if not isinstance(room_type, Mapping):
+                continue
+            evidence_id = _record_key(run_id, "room_type_observation", place_id, index)
+            records.append(
+                _omit_none(
+                    {
+                        "证据记录ID": evidence_id,
+                        "交付状态": "已提供",
+                        "证据类型": "房型观察",
+                        "竞品记录ID": competitor_keys.get(place_id),
+                        "竞品名称": candidate.get("name") or place_id,
+                        "OTA平台": booking.get("platform"),
+                        "OTA酒店ID": booking.get("property_id"),
+                        "房型": room_type.get("room_type"),
+                        "房型来源ID": room_type.get("room_type_provider_id"),
+                        "DOM已验证": True,
+                        "来源URL": room_type.get("source_url"),
+                        "采集时间": room_type.get("observed_at"),
+                        "附件状态": "无附件",
+                    }
+                )
+            )
         for index, offer in enumerate(candidate.get("room_offers", []), start=1):
             if not isinstance(offer, Mapping):
                 continue

@@ -320,6 +320,24 @@ def _offer_rows(candidate: Mapping[str, Any]) -> list[list[str]]:
     return offer_rows
 
 
+def _room_type_evidence_rows(candidate: Mapping[str, Any]) -> list[list[str]]:
+    """Render OTA room-type names without treating them as a price offer."""
+
+    rows = []
+    for item in candidate.get("room_type_evidence", []):
+        if not isinstance(item, Mapping):
+            continue
+        rows.append(
+            [
+                _text(item.get("room_type") or "未命名房型"),
+                _text(item.get("room_type_provider_id") or "—"),
+                _url(item.get("source_url")),
+                _text(item.get("observed_at") or "—"),
+            ]
+        )
+    return rows
+
+
 def _observation_rows(candidate: Mapping[str, Any]) -> list[list[str]]:
     """Show page-observed prices without promoting them into the ADR model."""
 
@@ -370,6 +388,8 @@ def _candidate_card(candidate: Mapping[str, Any]) -> str:
     return (
         f'<article class="candidate"><h3>{name}</h3>'
         f"{_table(['字段', '值'], detail_rows)}"
+        '<h4>已采集房型（非报价）</h4>'
+        f"{_table(['房型', '房型来源 ID', '页面来源', '采集时间'], _room_type_evidence_rows(candidate))}"
         '<h4>已采集房型与报价</h4>'
         f"{_table(['房型', '机位', '同条件房价（元）'], _offer_rows(candidate))}"
         '<h4>携程页面价格观察</h4>'

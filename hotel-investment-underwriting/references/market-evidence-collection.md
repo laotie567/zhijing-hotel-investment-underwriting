@@ -98,7 +98,7 @@ Profile、确认中心、全量候选数和按排序 `provider_place_id` 计算�
 它不会生成伪 ADR；若 2km 空间候选已完整，Skill 仍可输出待人工确认目标 ADR 的
 `ready_for_review`，但绝不会把地图列表价写入财务输入。
 
-`ctrip-hotel-v1` 是 macOS 上的 Ego Lite Profile。它以全量地图结果传入的
+`ctrip-hotel-v1` 是 macOS/Mac Mini 上的 **默认** Ego Lite OTA Profile。它以全量地图结果传入的
 `candidate_inventory` 为边界，只处理 `benchmark_selected: true` 且已有显式
 `ota_property` 映射的标杆；不会根据名称猜 OTA 房源。未登录显示“登录看低价”时
 返回 `partial`，请先在 Ego Lite 登录批准的 OTA 后重跑。完整 Mac Mini/Hermes
@@ -108,16 +108,26 @@ Profile、确认中心、全量候选数和按排序 `provider_place_id` 计算�
 最终展示价、取消文案记录为 **P1 `pricing_observations`**，并仅选择酒店/房型图库图片（不会把
 账户头像、Logo 或二维码写入竞品视觉证据）。P1 会出现在 HTML 与飞书多维表格，便于人工比价和
 装修对标；但 Ego Profile 不读取 Network 载荷，也不猜测税费口径或机位数，故 P1 始终
-`adr_eligible: false`，不得进入财务 ADR。
+`adr_eligible: false`，不得进入财务 ADR。页面明确显示“无可订房”“售罄”或“不接受预订”时，
+Ego 返回非重试 `NO_INVENTORY`：这是一条完成的负向价格结果，保留已取得的房型/图片与页面来源，
+但不会拿附近酒店列表价代替该竞品价格。
+
+当详情页存在结构化可订房型卡片时，Ego 同时保留 `room_type_evidence`：这是房型名称、稳定房型
+来源 ID、页面 URL 和带时区采集时间。它在“竞品报价与视觉证据”表以“房型观察”单独写入，在
+HTML 的“已采集房型（非报价）”区展示；酒店介绍、特色、评论或附近列表里的“套房/电竞房”文字
+绝不计为房型。发生 `NO_INVENTORY` 时，已有房型观察可交付；若 OTA 未展示结构化房型，则如实
+返回房型待补，且不会被提升为 P1 价格或 ADR 样本。
 
 实时报价 Profile 必须为每条 `room_offers` 同时记录：正式竞品的 provider ID、OTA
 房源/房型 ID、房型、机位数、可订状态、每晚含税/取消口径价格、完全相同的
 `pricing_context`、来源 URL 和带时区采集时间。缺任一项的页面价格只能作为原始
 观察，不能进入 ADR 中位数或财务输入。
 
-`ctrip-live-rates-v1` 是携程实时价的生产 Profile。它需要 Chrome 中独立的
+`ctrip-live-rates-v1` 是可选的携程 P2 强校验 Profile；默认 Ego 链路不依赖它。它需要 Chrome 中独立的
 `ctrip-price-worker` Profile、人工完成的携程登录、Ui.Vision 与 OpenCLI Browser
-Bridge。Ui.Vision 是**唯一**页面动作执行者；OpenCLI 只绑定同一标签页，读取动作前后
+Bridge。OpenCLI 当前一次只能可靠绑定**一个**已连接的 Browser Bridge Profile：必须只保留
+`ctrip-price-worker` 启用该扩展并标为 default，其他 Chrome Profile 的该扩展须禁用；否则预检
+返回 `action_required`，不会进入携程页面。Ui.Vision 是**唯一**页面动作执行者；OpenCLI 只绑定同一标签页，读取动作前后
 的 Network 与 DOM。系统不读取 Cookie、请求头、令牌或原始 Network body。若没有显式
 `ota_property`，它只通过 `opencli ctrip search` 的唯一精确名称结果创建映射；多个或零个
 结果均返回 `HOTEL_MAPPING_AMBIGUOUS`，不猜测。自动映射还必须从 `target.address` 解析出

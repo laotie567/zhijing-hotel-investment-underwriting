@@ -23,6 +23,7 @@ const MAX_EMBEDDED_BYTES = 7_500_000;
 const MAX_NETWORK_DETAILS = 24;
 const MAX_IMAGES_PER_CANDIDATE = 4;
 const LOCK_MAX_AGE_MS = 12 * 60 * 1_000;
+const DEFAULT_UIVISION_PAIRING_WAIT_SECONDS = 90;
 const COLLECTOR_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const CTRIP_DOM_PARSER = path.join(COLLECTOR_ROOT, "..", "scripts", "ctrip_dom_parser.py");
 const LOCAL_PARSER_PYTHON = path.join(COLLECTOR_ROOT, ".venv", "bin", "python");
@@ -143,6 +144,53 @@ function readMcpText(result) {
     .join("\n");
 }
 
+function mcpTextOrThrow(result, action) {
+  const text = readMcpText(result);
+  if (result?.isError) {
+    throw new Error(`${action} failed: ${redact(text || "Ui.Vision returned an empty error", 300)}`);
+  }
+  return text;
+}
+
+function macroNameFromText(value) {
+  // Macro listings are newline-delimited paths. Do not use compact() here:
+  // it intentionally collapses whitespace for user-facing text and would
+  // concatenate the created path with the following macro entry.
+  const text = typeof value === "string" ? value.slice(0, 4_000) : "";
+  if (!text || !text.includes(MACRO_NAME)) return "";
+  // The bridge normally returns this exact path. Some extension builds append
+  // a human-readable macro listing to the same text block without a delimiter,
+  // so extract only the deterministic generated-name segment before inspecting
+  // any generic list entry. Ui.Vision may add a small collision suffix.
+  const escapedName = MACRO_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const generated = text.match(new RegExp(`AI Generated/${escapedName}(?: \\([0-9]+\\)|[-_][0-9]+)?`));
+  if (generated) return generated[0];
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    const folderOffset = line.indexOf("AI Generated/");
+    if (folderOffset >= 0 && line.slice(folderOffset).includes(MACRO_NAME)) {
+      return line.slice(folderOffset).replace(/^[`"']+|[`"'.,;:]+$/g, "").trim();
+    }
+    const directOffset = line.indexOf(MACRO_NAME);
+    if (directOffset >= 0) {
+      const quoted = line.match(new RegExp(`[\\"'](${MACRO_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\w .()_-]*)[\\"']`));
+      if (quoted) return quoted[1];
+      const direct = line.slice(directOffset).replace(/^[`"']+|[`"'.,;:]+$/g, "").trim();
+      if (/^[\w .()/-]+$/.test(direct)) return direct;
+    }
+  }
+  return "";
+}
+
+function macroNameFromListing(value) {
+  const parsed = parseJson(value);
+  if (Array.isArray(parsed)) {
+    const matched = parsed.find((item) => item && typeof item.name === "string" && item.name.includes(MACRO_NAME));
+    if (matched) return compact(matched.name, 500);
+  }
+  return macroNameFromText(value);
+}
+
 class McpStdioClient {
   constructor(command) {
     this.command = command;
@@ -220,6 +268,26 @@ function bridgeCommand() {
   return ["uivision-mcp-bridge"];
 }
 
+function pairingWaitSeconds() {
+  const requested = Number(process.env.MARKET_EVIDENCE_UIVISION_PAIRING_WAIT_SECONDS);
+  return Number.isInteger(requested) && requested >= 10 && requested <= 300
+    ? requested
+    : DEFAULT_UIVISION_PAIRING_WAIT_SECONDS;
+}
+
+async function waitForUiVisionExtension(bridge, timeoutSeconds = pairingWaitSeconds(), intervalMs = 1_000) {
+  const timeout = Number(timeoutSeconds);
+  const interval = Number(intervalMs);
+  const deadline = Date.now() + Math.max(0, timeout) * 1_000;
+  do {
+    const status = readMcpText(await bridge.tool("bridge_status", {}, 15_000));
+    if (/CONNECTED/i.test(status) && !/NOT connected/i.test(status)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, interval)));
+  } while (Date.now() <= deadline);
+  return false;
+}
+
 function fixedMacro() {
   return {
     Name: MACRO_NAME,
@@ -234,26 +302,27 @@ function fixedMacro() {
 }
 
 async function ensureMacro(bridge) {
-  const listingText = readMcpText(await bridge.tool("list_macros"));
-  let macroName = "";
-  const listing = parseJson(listingText);
-  if (Array.isArray(listing)) {
-    const matched = listing.find((item) => item && typeof item.name === "string" && item.name.includes(MACRO_NAME));
-    if (matched) macroName = matched.name;
-  }
-  if (!macroName && listingText.includes(MACRO_NAME)) macroName = MACRO_NAME;
+  const listingText = mcpTextOrThrow(await bridge.tool("list_macros"), "Ui.Vision macro listing");
+  let macroName = macroNameFromListing(listingText);
   if (!macroName) {
-    await bridge.tool("create_macro", { macro_json: JSON.stringify(fixedMacro()), why: "Install the versioned, fixed Ctrip rate-refresh macro." });
-    const secondListing = readMcpText(await bridge.tool("list_macros"));
-    const parsed = parseJson(secondListing);
-    if (Array.isArray(parsed)) {
-      const matched = parsed.find((item) => item && typeof item.name === "string" && item.name.includes(MACRO_NAME));
-      if (matched) macroName = matched.name;
+    // create_macro opens a new macro below "AI Generated/" and returns its
+    // final, possibly de-duplicated path. Use that response directly: a fresh
+    // macro is not guaranteed to appear in a subsequent listing immediately.
+    const createdText = mcpTextOrThrow(
+      await bridge.tool("create_macro", { macro_json: JSON.stringify(fixedMacro()), why: "Install the versioned, fixed Ctrip rate-refresh macro." }),
+      "Ui.Vision macro creation",
+    );
+    macroName = macroNameFromText(createdText);
+    if (!macroName) {
+      const secondListing = mcpTextOrThrow(await bridge.tool("list_macros"), "Ui.Vision macro re-listing");
+      macroName = macroNameFromListing(secondListing);
     }
-    if (!macroName && secondListing.includes(MACRO_NAME)) macroName = MACRO_NAME;
   }
   if (!macroName) throw new Error("Ui.Vision did not expose the fixed Ctrip refresh macro");
-  await bridge.tool("open_macro", { name: macroName, why: "Run the fixed Ctrip rate-refresh macro." });
+  mcpTextOrThrow(
+    await bridge.tool("open_macro", { name: macroName, why: "Run the fixed Ctrip rate-refresh macro." }),
+    "Ui.Vision macro open",
+  );
   return macroName;
 }
 
@@ -834,10 +903,9 @@ async function collect(request) {
     release = acquireLock();
     bridge = new McpStdioClient(bridgeCommand());
     await bridge.start();
-    const bridgeStatus = readMcpText(await bridge.tool("bridge_status"));
-    if (/NOT connected|not connected/i.test(bridgeStatus)) {
-      result.collection_issues.push(issue("UIVISION_UNPAIRED", "Ui.Vision 扩展尚未与本机 MCP Bridge 配对；没有执行携程页面动作。", true));
-      result.collection_gaps.push("Ui.Vision 未配对；请在 ctrip-price-worker Chrome Profile 中完成配对后重试。");
+    if (!await waitForUiVisionExtension(bridge)) {
+      result.collection_issues.push(issue("UIVISION_UNPAIRED", `Ui.Vision 侧边栏未在 ${pairingWaitSeconds()} 秒内连接到本次采集 Bridge；没有执行携程页面动作。`, true));
+      result.collection_gaps.push("Ui.Vision 未在本次采集启动后连接；请保持 ctrip-price-worker 的侧边栏打开，并在运行开始后点击 Test 后重试。");
       return result;
     }
     await ensureMacro(bridge);
@@ -885,8 +953,13 @@ async function collect(request) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const raw = process.env.MARKET_EVIDENCE_REQUEST_JSON;
-  if (!raw) throw new Error("MARKET_EVIDENCE_REQUEST_JSON is required");
+  // The platform-neutral host tool supplies the validated contract over
+  // stdin. Retain the environment form for direct operator diagnostics.
+  let raw = process.env.MARKET_EVIDENCE_REQUEST_JSON || "";
+  if (!raw) {
+    for await (const chunk of process.stdin) raw += chunk;
+  }
+  if (!raw.trim()) throw new Error("collection request JSON is required on stdin or MARKET_EVIDENCE_REQUEST_JSON");
   const request = JSON.parse(raw);
   const result = await collect(request);
   console.log(JSON.stringify(result));
@@ -903,5 +976,7 @@ export {
   networkRates,
   normalizedName,
   observation,
+  ensureMacro,
+  waitForUiVisionExtension,
   verifyContext,
 };

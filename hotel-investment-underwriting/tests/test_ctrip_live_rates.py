@@ -239,6 +239,89 @@ console.log(JSON.stringify(observation(match, {check_in_date:'2026-08-20',nights
         self.assertFalse(value["adr_eligible"])
         self.assertIn("dom_parser_unverified", value["qualification_gaps"])
 
+    def test_live_batch_waits_for_the_side_panel_connection_before_actions(self) -> None:
+        script = """
+import { waitForUiVisionExtension } from './collector/ctrip_live_rates.mjs';
+let calls = 0;
+const bridge = { tool: async () => ({content:[{type:'text', text: ++calls < 3 ? 'NOT connected' : 'CONNECTED'}]}) };
+console.log(JSON.stringify({connected: await waitForUiVisionExtension(bridge, 1, 0), calls}));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        value = json.loads(completed.stdout)
+
+        self.assertTrue(value["connected"])
+        self.assertEqual(3, value["calls"])
+
+    def test_created_macro_uses_the_returned_ui_vision_folder_path(self) -> None:
+        """Ui.Vision saves agent macros below ``AI Generated/`` under its final name."""
+
+        script = """
+import { ensureMacro } from './collector/ctrip_live_rates.mjs';
+const calls = [];
+const bridge = { tool: async (name, args = {}) => {
+  calls.push({name, args});
+  if (name === 'list_macros') return {content:[{type:'text', text:'48 macros (folder paths relative to macro root):'}], isError:false};
+  if (name === 'create_macro') return {content:[{type:'text', text:'AI Generated/zhijing-ctrip-wait-rates-v1 Demo and QA Test Scripts/Browser Vision (Chrome, Edge)/DemoBrowserClick.js'}], isError:false};
+  if (name === 'open_macro') return {content:[{type:'text', text:'opened'}], isError:false};
+  throw new Error(`unexpected ${name}`);
+}};
+console.log(JSON.stringify({macro: await ensureMacro(bridge), calls}));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        value = json.loads(completed.stdout)
+        self.assertEqual("AI Generated/zhijing-ctrip-wait-rates-v1", value["macro"])
+        self.assertEqual(
+            ["list_macros", "create_macro", "open_macro"],
+            [call["name"] for call in value["calls"]],
+        )
+        self.assertEqual(
+            "AI Generated/zhijing-ctrip-wait-rates-v1",
+            value["calls"][-1]["args"]["name"],
+        )
+
+    def test_cli_accepts_the_standard_input_contract_used_by_the_host_tool(self) -> None:
+        completed = subprocess.run(
+            ["node", str(ROOT / "collector" / "ctrip_live_rates.mjs")],
+            cwd=ROOT,
+            input="{}",
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertNotIn("MARKET_EVIDENCE_REQUEST_JSON is required", completed.stderr)
+        self.assertIn("unsupported market evidence contract", completed.stderr)
+
+    def test_ctrip_smoke_fixture_is_a_valid_complete_map_pool_handoff(self) -> None:
+        value = json.loads(
+            (ROOT / "tests" / "fixtures" / "market-evidence-ctrip-smoke.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        normalized = market_evidence_contract.validate_collection_request(value)
+
+        self.assertEqual("complete", normalized["candidate_pool"]["status"])
+        self.assertEqual(1, normalized["candidate_pool"]["candidate_count"])
+
     def test_ota_mapping_requires_the_exact_hotel_name_before_city_suffix(self) -> None:
         script = """
 import { mappingName } from './collector/ctrip_live_rates.mjs';

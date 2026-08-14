@@ -79,7 +79,7 @@ explicitly disclosed defaults.
 
 `competitor_report` 服务于 `--format html` 和 `--format bitable` 的图文交付。
 它可按正式竞品 `provider_place_id` 关联来源记录、装修观察及选定图片，并在视觉
-对标区或“竞品报价与视觉证据”表中与该竞品的机位和同条件报价集中展示；不属于
+对标区或“竞品报价与视觉证据”表中与该竞品的页面房型观察、机位和同条件报价集中展示；不属于
 财务输入，不能影响竞品分类、ADR 或投资测算。候选的可选 `market_profile` 仅补充
 历史市场调研字段（等级、装修、房量、设施、评分等），同样不参与计算。完整字段
 与图片约束见 `schemas/skill-request.schema.json`；Base 写入规则见
