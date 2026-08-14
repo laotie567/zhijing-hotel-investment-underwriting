@@ -76,6 +76,7 @@
       "status": "confirmed"
     },
     "candidate_count": 1,
-    "candidate_ids_sha256": "6ee04a47db8f610c02d82339ce6b47a264ca09c12539b910298a7467b544a36f"
+    "candidate_ids_sha256": "6ee04a47db8f610c02d82339ce6b47a264ca09c12539b910298a7467b544a36f",
+    "candidate_snapshot_sha256": "1965b3981006f7df85fda186a429dce746314ccaae6d1f9fa2babd03481a9092"
   }
 }

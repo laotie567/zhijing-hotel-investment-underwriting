@@ -6,6 +6,7 @@ import copy
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import unittest
@@ -18,6 +19,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import collect_market_evidence  # noqa: E402
 import market_evidence_contract  # noqa: E402
 import run  # noqa: E402
+
+
+ATTESTATION_KEY = "market-evidence-test-key-with-at-least-32-bytes"
 
 
 def request() -> dict:
@@ -95,6 +99,9 @@ def spatial_pool(inventory: list[dict], center: dict, *, status: str = "complete
         "candidate_ids_sha256": hashlib.sha256(
             json.dumps(identifiers, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         ).hexdigest(),
+        "candidate_snapshot_sha256": market_evidence_contract._candidate_snapshot_sha256(
+            [item["candidate"] for item in inventory]
+        ),
     }
 
 
@@ -123,9 +130,9 @@ def result(*, status: str = "partial") -> dict:
         "target_resolution": request()["target"]["center"],
         "coverage": {
             "candidates": {"status": "complete", "observed_count": 3},
-            "benchmark_set": {"status": "complete", "observed_count": 2},
-            "room_types": {"status": "complete", "observed_count": 4},
-            "images": {"status": "partial", "observed_count": 2},
+            "benchmark_set": {"status": "complete", "observed_count": 0},
+            "room_types": {"status": "not_collected", "observed_count": 0},
+            "images": {"status": "partial", "observed_count": 0},
             "pricing": {"status": "not_collected", "observed_count": 0},
         },
         "collection_gaps": ["当前页面来源未完成同条件房态与报价采集；不得生成竞品 ADR 建议"],
@@ -140,6 +147,61 @@ def result(*, status: str = "partial") -> dict:
 
 
 class MarketEvidenceContractTests(unittest.TestCase):
+    def test_skill_patch_rejects_an_unattested_or_tampered_receipt(self) -> None:
+        receipt = result()
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(
+                market_evidence_contract.MarketEvidenceContractError,
+                "attestation",
+            ):
+                market_evidence_contract.skill_request_patch(receipt)
+
+        with patch.dict(
+            os.environ,
+            {"MARKET_EVIDENCE_RECEIPT_HMAC_KEY": ATTESTATION_KEY},
+            clear=True,
+        ):
+            attested = market_evidence_contract.attest_collection_result(receipt)
+            result_patch = market_evidence_contract.skill_request_patch(attested)
+            self.assertEqual("market-evidence-collection/v2", result_patch["market_evidence"]["contract_version"])
+            tampered = copy.deepcopy(attested)
+            tampered["competitor_analysis"]["candidates"][0]["name"] = "被篡改的竞品"
+            with self.assertRaisesRegex(
+                market_evidence_contract.MarketEvidenceContractError,
+                "signature",
+            ):
+                market_evidence_contract.skill_request_patch(tampered)
+
+    def test_ego_p1_receipt_cannot_inject_an_adr_room_offer(self) -> None:
+        receipt = result()
+        receipt["collector"]["engine"] = "ego-browser"
+        receipt["collector"]["source_profile"] = "ctrip-hotel-v1"
+        receipt["competitor_analysis"]["collection_status"] = "complete"
+        receipt["spatial_collection"] = spatial_pool(
+            [{"candidate": candidate} for candidate in receipt["competitor_analysis"]["candidates"]],
+            receipt["competitor_analysis"]["confirmed_location"],
+        )
+        receipt["competitor_analysis"]["candidates"][0]["room_offers"] = [
+            {
+                "room_type": "双人电竞房",
+                "room_type_provider_id": "forged-P1",
+                "workstations": 2,
+                "nightly_price": 260,
+                "availability": "available",
+                "currency": "CNY",
+                "tax_included": True,
+                "cancellation_policy": "免费取消",
+                "pricing_context": request()["pricing_context"],
+                "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                "observed_at": "2026-08-14T00:00:00Z",
+            }
+        ]
+        with self.assertRaisesRegex(
+            market_evidence_contract.MarketEvidenceContractError,
+            "P1.*room_offers",
+        ):
+            market_evidence_contract.validate_collection_result(receipt)
+
     def test_v1_receipts_fail_closed_after_the_v2_contract_migration(self) -> None:
         legacy_request = request()
         legacy_request["contract_version"] = "market-evidence-collection/v1"
@@ -199,12 +261,19 @@ class MarketEvidenceContractTests(unittest.TestCase):
             market_evidence_contract.validate_collection_request(invalid)
 
     def test_collection_patch_contains_only_public_skill_input_fields(self) -> None:
-        patch = market_evidence_contract.skill_request_patch(result())
+        with patch.dict(
+            os.environ,
+            {"MARKET_EVIDENCE_RECEIPT_HMAC_KEY": ATTESTATION_KEY},
+            clear=True,
+        ):
+            result_patch = market_evidence_contract.skill_request_patch(
+                market_evidence_contract.attest_collection_result(result())
+            )
 
         self.assertEqual(
-            {"market_evidence", "competitor_analysis", "competitor_report"}, set(patch)
+            {"market_evidence", "competitor_analysis", "competitor_report"}, set(result_patch)
         )
-        self.assertEqual("partial", patch["competitor_analysis"]["collection_status"])
+        self.assertEqual("partial", result_patch["competitor_analysis"]["collection_status"])
 
     def test_partial_ota_receipt_may_preserve_completed_spatial_collection(self) -> None:
         value = result()
@@ -218,6 +287,37 @@ class MarketEvidenceContractTests(unittest.TestCase):
 
         self.assertEqual("partial", normalized["status"])
         self.assertEqual("complete", normalized["competitor_analysis"]["collection_status"])
+
+    def test_spatial_pool_rejects_a_changed_coordinate_even_when_ids_and_count_match(self) -> None:
+        value = result()
+        value["competitor_analysis"]["collection_status"] = "complete"
+        value["spatial_collection"] = spatial_pool(
+            [{"candidate": candidate} for candidate in value["competitor_analysis"]["candidates"]],
+            value["competitor_analysis"]["confirmed_location"],
+        )
+        value["competitor_analysis"]["candidates"][0]["longitude"] += 0.001
+
+        with self.assertRaisesRegex(
+            market_evidence_contract.MarketEvidenceContractError,
+            "candidate_snapshot_sha256",
+        ):
+            market_evidence_contract.validate_collection_result(value)
+
+    def test_browser_navigation_without_http_response_marks_status_unknown_explicitly(self) -> None:
+        value = result()
+        value["collector"]["page_sources"] = [
+            {
+                "url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                "status": None,
+                "status_observed": False,
+            }
+        ]
+
+        normalized = market_evidence_contract.validate_collection_result(value)
+
+        source = normalized["collector"]["page_sources"][0]
+        self.assertIsNone(source["status"])
+        self.assertFalse(source["status_observed"])
 
     def test_partial_receipt_cannot_claim_a_complete_spatial_pool_without_one(self) -> None:
         value = result()
@@ -290,7 +390,11 @@ class MarketEvidenceContractTests(unittest.TestCase):
             captured["timeout"] = timeout
             return result()
 
-        with patch.object(collect_market_evidence, "_run_process", side_effect=fake_runner), patch.object(
+        with patch.dict(
+            os.environ,
+            {"MARKET_EVIDENCE_RECEIPT_HMAC_KEY": ATTESTATION_KEY},
+            clear=True,
+        ), patch.object(collect_market_evidence, "_run_process", side_effect=fake_runner), patch.object(
             collect_market_evidence.market_evidence_runtime, "require_ready"
         ):
             collected = collect_market_evidence.collect(request(), engine="playwright", timeout_seconds=120)
@@ -299,6 +403,7 @@ class MarketEvidenceContractTests(unittest.TestCase):
         self.assertEqual("node", captured["command"][0])
         self.assertEqual(120, captured["timeout"])
         self.assertEqual("market-evidence-collection/v2", captured["payload"]["contract_version"])
+        self.assertIn("attestation", collected)
 
     def test_collector_rejects_a_center_different_from_the_confirmed_request(self) -> None:
         payload = request()
@@ -341,15 +446,19 @@ class MarketEvidenceContractTests(unittest.TestCase):
         defaults = json.loads(
             (ROOT / "references" / "benchmark-defaults.json").read_text(encoding="utf-8")
         )
-        receipt = result()
-        tampered = {
-            "project_input": project_input,
-            "market_evidence": receipt,
-            "competitor_analysis": {"collection_status": "complete", "candidates": []},
-        }
-
-        with self.assertRaisesRegex(run.SkillRunError, "must exactly match"):
-            run.run(tampered, defaults=defaults)
+        with patch.dict(
+            os.environ,
+            {"MARKET_EVIDENCE_RECEIPT_HMAC_KEY": ATTESTATION_KEY},
+            clear=True,
+        ):
+            receipt = market_evidence_contract.attest_collection_result(result())
+            tampered = {
+                "project_input": project_input,
+                "market_evidence": receipt,
+                "competitor_analysis": {"collection_status": "complete", "candidates": []},
+            }
+            with self.assertRaisesRegex(run.SkillRunError, "must exactly match"):
+                run.run(tampered, defaults=defaults)
 
 
 if __name__ == "__main__":

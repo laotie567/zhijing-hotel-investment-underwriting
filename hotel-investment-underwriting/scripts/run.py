@@ -197,7 +197,11 @@ def run(request: Mapping[str, Any], defaults: Mapping[str, Any] | None = None) -
         summary.append("【财务预评估】以下财务结论不构成完整的2km竞品结论。")
     summary.append(financial_result["feishu_summary"])
     return {
-        "status": "ok",
+        # Keep the user-visible status aligned with the actual decision scope.
+        # A successful Python invocation is reported separately, so a
+        # pre-evaluation cannot be mistaken for a production-ready conclusion.
+        "status": workflow["status"],
+        "execution_status": "ok",
         "skill_version": SKILL_VERSION,
         "input_sha256": _sha256(request),
         "defaults_sha256": _sha256(defaults) if defaults is not None else None,

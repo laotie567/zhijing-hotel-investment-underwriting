@@ -28,6 +28,7 @@ git archive --format=zip --output hotel-investment-underwriting-vX.Y.Z.zip \
 - Python 3.10+；核心测算只依赖标准库。选择 `ctrip-live-rates` 时，另在项目本地虚拟环境中安装锁定的 Scrapling **解析器依赖**；它不含浏览器、抓取器、代理或凭证处理；
 - 页面证据采集默认需要 Node 20+、`collector/package-lock.json` 和 Chromium；安装命令见 `references/market-evidence-collection.md`；
 - Mac Mini/Hermes 的默认验收先执行 `python3 scripts/collect_market_evidence.py --preflight --engine ego-browser`；地图池另按 Playwright 安装要求验收。Ego Lite 未安装/未登录时，按输出的 `install_hint` 处理并重启 Hermes。Ui.Vision+OpenCLI、OpenCLI Ctrip 搜索命令或 Kimi WebBridge 只在宿主显式启用对应可选 Profile 时才需预检；Ego Lite 与可选扩展都仅用于本机 macOS 认证页面会话，不替代云端采集器；
+- 宿主还必须安全注入至少 32 字节的 `MARKET_EVIDENCE_RECEIPT_HMAC_KEY`。它只用于给本机采集回执作 HMAC 证明；缺失、被改写或来自另一台主机密钥的回执都不能进入 `run.py`。密钥不进入请求、结果、HTML、飞书清单、日志或 Git；
 - 宿主安全注入已授权页面来源会话/凭证；Skill 不读取或保存凭证；
 - 宿主按需要保存请求、结果和发送消息；Skill 不要求数据库、持久状态目录或守护进程。`ctrip-live-rates` 仅在单次运行期间创建并删除临时浏览器互斥锁。
 
@@ -81,12 +82,12 @@ Ego Lite 登录态仅驻留在这台 Mac Mini。若 OTA 显示“登录看低价
 
 ## 宿主调用顺序
 
-1. 标准路径先用 `360-map-v1` 采集中心点和全量同源 2km 候选，保存回执中的 `spatial_collection`；再把**全量**候选和这份原样 `candidate_pool` 交给 Ego `ctrip-hotel-v1`。该 Profile 要求显式 OTA 实体映射；只有显式启用的 P2 扩展 `ctrip-live-rates-v1` 才可按名称+城市唯一精确地自动映射。OTA 回执必须原样返回该池，且运行器拒绝引擎/Profile/中心/候选指纹不匹配。
+1. 标准路径先用 `360-map-v1` 的住宿发现词组采集中心点和全量同源 2km 住宿候选，保留主营电竞和“普通住宿含电竞房”两类，并保存回执中的 `spatial_collection`；再把**全量**候选和这份带不可变候选快照哈希的原样 `candidate_pool` 交给 Ego `ctrip-hotel-v1`。该 Profile 要求显式 OTA 实体映射；只有显式启用的 P2 扩展 `ctrip-live-rates-v1` 才可按名称+城市唯一精确地自动映射。OTA 回执必须原样返回该池，且运行器拒绝引擎/Profile/中心/候选 ID 或不可变快照不匹配。
 2. `competitor_analysis.collection_status=complete` 只表示全量 2km 空间候选已被证明完成。房型、图片、同条件报价的 `partial` 仍使**采集回执**为 `partial`，阻止 ADR 或完整交付，但不会把已完成的空间竞品集合降级为未完成。
 3. 把 `--format skill-patch` 输出与项目财务输入组装为统一请求并调用 `scripts/run.py`。
 4. 先读取 `workflow.status`，再展示竞品和财务结果。
 5. 如需交付竞品调研，使用相同请求执行 `--format html` 并将标准输出保存为 `.html` 文件。
-6. 如需交付飞书多维表格，使用相同请求执行 `--format bitable` 并将标准输出保存为 JSON 清单；先检查 `delivery_gate.final_delivery_eligible`。为 `false` 时只能写入带待补记录的草稿，不能称为完整交付；为 `true` 时仍先写入“待写入核验”，只有宿主上传并读回所有附件、关联和记录后才更新为“可交付”。已授权宿主按 `references/bitable-delivery.md` 创建/迁移模板并写入。Skill 本身不持有飞书凭证或写入状态。
+6. 如需交付飞书多维表格，使用相同请求执行 `--format bitable` 并将标准输出保存为 JSON 清单；分别读取 `delivery_gate.payload_write_eligible`、`market_evidence_status`、`adr_evidence_status` 和 `investment_decision_scope`。载荷可写只表示八张表可写入并读回，不能代表市场证据、ADR 或投决已完成；宿主读回记录、关联和附件后，只能把 `交付载荷状态` 从“待写入核验”改为“写入已核验”。已授权宿主按 `references/bitable-delivery.md` 创建/迁移模板并写入。Skill 本身不持有飞书凭证或写入状态。
 
 无法确认点位、空间候选池不完整、候选证据不完整或重复 `provider_place_id` 时，Skill 返回
 `pre_evaluation_only`，而不是伪造完整的竞品结论。OTA 映射、图片或价格不完整会保留
@@ -131,7 +132,8 @@ git archive --format=tar HEAD | tar -tf -
 ```
 
 归档边界测试读取 Git 暂存树，并以与生产命令一致的 `hotel-investment-underwriting/`
-子目录归档；运行完整测试前先执行 `git add -A`，确保它验证即将提交的发布内容。
+子目录归档；运行完整测试前只暂存本次明确要发布的代码和文档，确保它验证即将提交的发布内容，
+不要用 `git add -A` 把临时结果或客户资料一并暂存。
 完成测试、提交和 tag 后，再执行上面的 tag 打包命令。
 
 使用一份脱敏完整请求演练 JSON、Feishu 与 HTML 输出。HTML 应在不含 Skill

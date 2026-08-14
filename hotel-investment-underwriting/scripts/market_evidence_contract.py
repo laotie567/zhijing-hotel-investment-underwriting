@@ -9,10 +9,13 @@ turns an unscoped listing price into an ADR input.
 
 from __future__ import annotations
 
+import copy
 from datetime import date, datetime
 import hashlib
+import hmac
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -46,10 +49,73 @@ MAX_BENCHMARK_CANDIDATES = 8
 # This is a transport/validation safety limit for a *complete* 2km map pool,
 # not the deep-research limit.  The latter remains eight selected benchmarks.
 MAX_SPATIAL_CANDIDATES = 1_000
+_RECEIPT_ATTESTATION_ENVIRONMENT = "MARKET_EVIDENCE_RECEIPT_HMAC_KEY"
+_RECEIPT_ATTESTATION_ALGORITHM = "hmac-sha256"
 
 
 class MarketEvidenceContractError(ValueError):
     """Raised when collection input or its signed-off evidence is invalid."""
+
+
+def _canonical_json(value: Any) -> bytes:
+    """Return a stable byte representation for a host-issued receipt signature."""
+
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _receipt_attestation_key() -> bytes:
+    """Read the host-owned signing key without ever returning it in an error."""
+
+    configured = os.environ.get(_RECEIPT_ATTESTATION_ENVIRONMENT, "")
+    key = configured.encode("utf-8")
+    if len(key) < 32:
+        raise MarketEvidenceContractError(
+            "market evidence attestation is unavailable: host must provide "
+            f"{_RECEIPT_ATTESTATION_ENVIRONMENT} with at least 32 bytes"
+        )
+    return key
+
+
+def _unsigned_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: copy.deepcopy(item)
+        for key, item in value.items()
+        if key != "attestation"
+    }
+
+
+def _receipt_signature(value: Mapping[str, Any], key: bytes) -> str:
+    return hmac.new(key, _canonical_json(_unsigned_receipt(value)), hashlib.sha256).hexdigest()
+
+
+def _receipt_key_id(key: bytes) -> str:
+    return hashlib.sha256(key).hexdigest()[:16]
+
+
+def _validate_attestation(value: Any, path: str) -> dict[str, str]:
+    raw = _require_mapping(value, path)
+    _reject_unknown(raw, {"algorithm", "key_id", "signature"}, path)
+    if raw.get("algorithm") != _RECEIPT_ATTESTATION_ALGORITHM:
+        raise MarketEvidenceContractError(
+            f"{path}.algorithm must equal {_RECEIPT_ATTESTATION_ALGORITHM!r}"
+        )
+    key_id = _require_text(raw.get("key_id"), f"{path}.key_id", maximum=64)
+    signature = raw.get("signature")
+    if not isinstance(signature, str) or len(signature) != 64 or any(
+        character not in "0123456789abcdef" for character in signature
+    ):
+        raise MarketEvidenceContractError(f"{path}.signature must be a lowercase SHA-256 HMAC")
+    return {
+        "algorithm": _RECEIPT_ATTESTATION_ALGORITHM,
+        "key_id": key_id,
+        "signature": signature,
+    }
 
 
 def _require_mapping(value: Any, path: str) -> Mapping[str, Any]:
@@ -256,6 +322,48 @@ def _candidate_ids_sha256(candidates: list[Mapping[str, Any]]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _candidate_snapshot_sha256(candidates: list[Mapping[str, Any]]) -> str:
+    """Fingerprint the immutable map facts handed to every downstream profile.
+
+    A provider ID alone cannot prevent a caller from changing coordinates,
+    classification or source attribution while retaining the same candidate
+    count.  Enrichment fields (OTA mapping, room evidence and price evidence)
+    are intentionally excluded because those are added downstream.
+    """
+
+    immutable_fields = (
+        "provider",
+        "provider_place_id",
+        "coordinate_system",
+        "longitude",
+        "latitude",
+        "property_kind",
+        "esports_positioning",
+        "operating_status",
+        "source",
+    )
+    snapshot = []
+    for candidate in candidates:
+        item = {field: candidate.get(field) for field in immutable_fields}
+        source = candidate.get("source")
+        # Do not hash a caller-controlled mapping order. These are the exact
+        # immutable source fields accepted by the candidate normalizer and are
+        # emitted in the same order by the JavaScript map collector.
+        item["source"] = {
+            field: source.get(field) if isinstance(source, Mapping) else None
+            for field in ("source_platform", "source_url", "observed_at", "confidence")
+        }
+        snapshot.append(item)
+    snapshot.sort(key=lambda item: str(item.get("provider_place_id", "")))
+    # Field order above is part of this cross-runtime protocol: JavaScript's
+    # map collector emits the same ordered object list before handing it to
+    # Python. Do not alphabetically re-sort nested source keys here.
+    encoded = json.dumps(
+        snapshot, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _validate_spatial_pool(
     value: Any,
     *,
@@ -276,6 +384,7 @@ def _validate_spatial_pool(
             "center",
             "candidate_count",
             "candidate_ids_sha256",
+            "candidate_snapshot_sha256",
         },
         path,
     )
@@ -304,6 +413,17 @@ def _validate_spatial_pool(
         raise MarketEvidenceContractError(f"{path}.candidate_ids_sha256 must be lowercase SHA-256")
     if digest != _candidate_ids_sha256(candidates):
         raise MarketEvidenceContractError(f"{path}.candidate_ids_sha256 does not match candidate_inventory")
+    snapshot_digest = raw.get("candidate_snapshot_sha256")
+    if not isinstance(snapshot_digest, str) or len(snapshot_digest) != 64 or any(
+        character not in "0123456789abcdef" for character in snapshot_digest
+    ):
+        raise MarketEvidenceContractError(
+            f"{path}.candidate_snapshot_sha256 must be lowercase SHA-256"
+        )
+    if snapshot_digest != _candidate_snapshot_sha256(candidates):
+        raise MarketEvidenceContractError(
+            f"{path}.candidate_snapshot_sha256 does not match immutable candidate facts"
+        )
     return {
         "status": status,
         "source_engine": source_engine,
@@ -311,6 +431,7 @@ def _validate_spatial_pool(
         "center": center,
         "candidate_count": candidate_count,
         "candidate_ids_sha256": digest,
+        "candidate_snapshot_sha256": snapshot_digest,
     }
 
 
@@ -525,7 +646,139 @@ def _validate_collection_issue(value: Any, path: str) -> dict[str, Any]:
     return normalized
 
 
-def validate_collection_result(value: Any) -> dict[str, Any]:
+def _matches_verified_p2_observation(
+    offer: Mapping[str, Any], observation: Any
+) -> bool:
+    """Ensure an ADR offer is a lossless projection of one verified P2 observation."""
+
+    if not isinstance(observation, Mapping):
+        return False
+    if observation.get("price_type") != "P2":
+        return False
+    if not all(observation.get(field) is True for field in ("network_verified", "dom_verified", "price_match", "adr_eligible")):
+        return False
+    if observation.get("qualification_gaps") not in ([], None):
+        return False
+    fields = (
+        ("room_type", "room_type"),
+        ("room_type_provider_id", "room_type_provider_id"),
+        ("nightly_price", "display_price"),
+        ("availability", "availability"),
+        ("currency", "currency"),
+        ("tax_included", "tax_included"),
+        ("cancellation_policy", "cancellation_policy"),
+        ("pricing_context", "pricing_context"),
+        ("source_url", "source_url"),
+        ("observed_at", "observed_at"),
+    )
+    return all(offer.get(offer_field) == observation.get(observation_field) for offer_field, observation_field in fields)
+
+
+def _validate_profile_pricing_semantics(
+    profile: str, candidates: list[Mapping[str, Any]]
+) -> None:
+    """Keep P1 display observations structurally unable to become an ADR sample."""
+
+    for candidate_index, candidate in enumerate(candidates):
+        offers = candidate.get("room_offers", [])
+        if not isinstance(offers, list):
+            raise MarketEvidenceContractError(
+                f"collection_result.competitor_analysis.candidates[{candidate_index}].room_offers must be an array"
+            )
+        if profile in {"360-map-v1", "ctrip-hotel-v1"}:
+            if offers:
+                evidence_kind = "P1" if profile == "ctrip-hotel-v1" else "map"
+                raise MarketEvidenceContractError(
+                    f"{evidence_kind} profile {profile} must not emit room_offers for ADR"
+                )
+            continue
+        if profile != "ctrip-live-rates-v1":
+            continue
+        observations = candidate.get("pricing_observations", [])
+        if not isinstance(observations, list):
+            raise MarketEvidenceContractError(
+                f"collection_result.competitor_analysis.candidates[{candidate_index}].pricing_observations must be an array"
+            )
+        for offer_index, offer in enumerate(offers):
+            if not isinstance(offer, Mapping) or not any(
+                _matches_verified_p2_observation(offer, observation)
+                for observation in observations
+            ):
+                raise MarketEvidenceContractError(
+                    "P2 room_offers must exactly match one verified Network/DOM "
+                    f"pricing_observation (candidate {candidate_index}, offer {offer_index})"
+                )
+
+
+def _validate_benchmark_coverage_truth(
+    coverage: Mapping[str, Mapping[str, Any]],
+    candidates: list[Mapping[str, Any]],
+    report: Mapping[str, Any],
+    issues: list[Mapping[str, Any]],
+) -> None:
+    """Bind each benchmark coverage counter to source-attributed candidate facts."""
+
+    selected = {
+        str(candidate.get("provider_place_id"))
+        for candidate in candidates
+        if candidate.get("benchmark_selected") is True
+        and isinstance(candidate.get("provider_place_id"), str)
+    }
+    observed_benchmarks = coverage["benchmark_set"]["observed_count"]
+    if observed_benchmarks != len(selected):
+        raise MarketEvidenceContractError(
+            "collection_result.coverage.benchmark_set.observed_count must match benchmark_selected candidates"
+        )
+
+    room_type_ids = {
+        str(candidate.get("provider_place_id"))
+        for candidate in candidates
+        if str(candidate.get("provider_place_id")) in selected
+        and isinstance(candidate.get("room_type_evidence"), list)
+        and candidate["room_type_evidence"]
+    }
+    media = report.get("candidate_media", [])
+    image_ids = {
+        str(item.get("provider_place_id"))
+        for item in media
+        if isinstance(item, Mapping)
+        and str(item.get("provider_place_id")) in selected
+        and isinstance(item.get("images"), list)
+        and item["images"]
+    }
+    no_inventory_ids = {
+        str(item.get("provider_place_id"))
+        for item in issues
+        if item.get("code") == "NO_INVENTORY" and isinstance(item.get("provider_place_id"), str)
+    }
+    pricing_ids = {
+        str(candidate.get("provider_place_id"))
+        for candidate in candidates
+        if str(candidate.get("provider_place_id")) in selected
+        and isinstance(candidate.get("pricing_observations"), list)
+        and candidate["pricing_observations"]
+    } | (no_inventory_ids & selected)
+
+    facts = {
+        "room_types": room_type_ids,
+        "images": image_ids,
+        "pricing": pricing_ids,
+    }
+    for dimension, observed_ids in facts.items():
+        item = coverage[dimension]
+        if item["observed_count"] != len(observed_ids):
+            raise MarketEvidenceContractError(
+                f"collection_result.coverage.{dimension}.observed_count must match candidate evidence"
+            )
+        if item["status"] == "complete" and observed_ids != selected:
+            raise MarketEvidenceContractError(
+                f"complete collection_result.coverage.{dimension} requires every selected benchmark"
+            )
+
+
+def validate_collection_result(
+    value: Any, *, require_attestation: bool = False
+) -> dict[str, Any]:
     """Validate an adapter response before an agent merges it into Skill input."""
 
     raw = _require_mapping(value, "collection_result")
@@ -543,6 +796,7 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
             "competitor_analysis",
             "competitor_report",
             "spatial_collection",
+            "attestation",
         },
         "collection_result",
     )
@@ -584,13 +838,38 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
     page_sources = collector.get("page_sources", [])
     if not isinstance(page_sources, list) or len(page_sources) > 500:
         raise MarketEvidenceContractError("collection_result.collector.page_sources is invalid")
-    normalized_collector["page_sources"] = [
-        {
-            "url": _require_url(_require_mapping(item, "page_source").get("url"), "page_source.url"),
-            "status": _require_integer(_require_mapping(item, "page_source").get("status"), "page_source.status", 100, 599),
-        }
-        for item in page_sources
-    ]
+    normalized_collector["page_sources"] = []
+    for index, item in enumerate(page_sources):
+        path = f"collection_result.collector.page_sources[{index}]"
+        source = _require_mapping(item, path)
+        _reject_unknown(source, {"url", "status", "status_observed"}, path)
+        # Browser control APIs can prove the page URL without exposing a real
+        # HTTP response.  Make that uncertainty explicit instead of recording
+        # a fabricated 200.  Legacy signed receipts that omit the flag are
+        # interpreted as a real status only when they carry a valid integer.
+        observed = source.get("status_observed")
+        if observed is None:
+            observed = source.get("status") is not None
+        if not isinstance(observed, bool):
+            raise MarketEvidenceContractError(f"{path}.status_observed must be boolean")
+        status = source.get("status")
+        if observed:
+            normalized_status: int | None = _require_integer(
+                status, f"{path}.status", 100, 599
+            )
+        else:
+            if status is not None:
+                raise MarketEvidenceContractError(
+                    f"{path}.status must be null when status_observed=false"
+                )
+            normalized_status = None
+        normalized_collector["page_sources"].append(
+            {
+                "url": _require_url(source.get("url"), f"{path}.url"),
+                "status": normalized_status,
+                "status_observed": observed,
+            }
+        )
     if not normalized_collector["page_sources"] and raw["status"] != "failed":
         raise MarketEvidenceContractError("a non-failed collection requires a page-source receipt")
 
@@ -636,6 +915,15 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
         not isinstance(item, Mapping) for item in analysis_candidates
     ):
         raise MarketEvidenceContractError("collection_result.competitor_analysis.candidates must be an object array")
+    _validate_profile_pricing_semantics(
+        normalized_collector["source_profile"], analysis_candidates
+    )
+    _validate_benchmark_coverage_truth(
+        normalized_coverage,
+        analysis_candidates,
+        report,
+        normalized_issues,
+    )
     analysis_center = analysis.get("confirmed_location")
     normalized_analysis_center = (
         _validate_center(
@@ -694,18 +982,54 @@ def validate_collection_result(value: Any) -> dict[str, Any]:
         normalized["spatial_collection"] = normalized_spatial
     if "request_id" in raw:
         normalized["request_id"] = _require_text(raw["request_id"], "collection_result.request_id", maximum=200)
+    if "attestation" in raw:
+        normalized["attestation"] = _validate_attestation(
+            raw["attestation"], "collection_result.attestation"
+        )
+    if require_attestation:
+        attestation = normalized.get("attestation")
+        if not isinstance(attestation, Mapping):
+            raise MarketEvidenceContractError(
+                "market evidence attestation is required; pass a receipt emitted by collect_market_evidence.py"
+            )
+        key = _receipt_attestation_key()
+        if attestation.get("key_id") != _receipt_key_id(key):
+            raise MarketEvidenceContractError("market evidence attestation key_id does not match this host")
+        if not hmac.compare_digest(
+            str(attestation.get("signature", "")), _receipt_signature(normalized, key)
+        ):
+            raise MarketEvidenceContractError("market evidence attestation signature is invalid")
     return normalized
 
 
 def skill_request_patch(value: Any) -> dict[str, Any]:
     """Return receipt plus the two evidence fields an agent merges into Skill input."""
 
-    result = validate_collection_result(value)
+    result = validate_collection_result(value, require_attestation=True)
     return {
         "market_evidence": result,
         "competitor_analysis": result["competitor_analysis"],
         "competitor_report": result["competitor_report"],
     }
+
+
+def attest_collection_result(value: Any) -> dict[str, Any]:
+    """Attach a host HMAC after an adapter receipt has passed structural validation.
+
+    The HMAC key is injected by the deployment host and never enters a result,
+    report, manifest, source tree, or production archive.  A later `run.py`
+    invocation must use the same host-scoped key to consume the receipt.
+    """
+
+    normalized = validate_collection_result(value, require_attestation=False)
+    unsigned = _unsigned_receipt(normalized)
+    key = _receipt_attestation_key()
+    unsigned["attestation"] = {
+        "algorithm": _RECEIPT_ATTESTATION_ALGORITHM,
+        "key_id": _receipt_key_id(key),
+        "signature": _receipt_signature(unsigned, key),
+    }
+    return unsigned
 
 
 def load_json_object(path: str) -> dict[str, Any]:

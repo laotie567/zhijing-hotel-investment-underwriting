@@ -484,7 +484,10 @@ function networkRates(body, endpoint) {
       return;
     }
     const roomName = textAt(node, ["roomName", "roomTypeName", "baseRoomName", "roomDisplayName", "name"]);
-    const price = numberAt(node, ["payPrice", "salePrice", "displayPrice", "price", "amount", "totalPrice"]);
+    // Total-stay and generic amount fields have no stable per-night meaning.
+    // ADR only accepts a provider field that explicitly represents the room's
+    // displayed nightly rate under this one booking context.
+    const price = numberAt(node, ["nightlyPrice", "perNightPrice", "payPrice", "salePrice", "displayPrice", "price"]);
     if (roomName && roomName.includes("房") && price !== null) {
       const ratePlan = textAt(node, ["ratePlanName", "rateName", "productName", "priceName"]);
       const identifier = textAt(node, ["roomId", "roomTypeId", "baseRoomId", "id"]);
@@ -622,8 +625,9 @@ function observation(match, context, sourceUrl, observedAt, contextVerified = tr
   if (!domParserVerified) gaps.push("dom_parser_unverified");
   if (!match.price_match) gaps.push("network_dom_price_mismatch");
   if (rate.availability !== "available") gaps.push("availability_not_confirmed");
-  if (rate.tax_included === null || dom?.tax_included === null) gaps.push("tax_scope_unknown");
-  if (!rate.cancellation_policy && !dom?.cancellation_policy) gaps.push("cancellation_policy_missing");
+  if (rate.tax_included === null || !dom || dom.tax_included === null) gaps.push("tax_scope_unknown");
+  else if (rate.tax_included !== dom.tax_included) gaps.push("tax_scope_mismatch");
+  if (!rate.cancellation_policy || !dom?.cancellation_policy) gaps.push("cancellation_policy_missing");
   const workstation = dom?.workstations || workstationCount(rate.room_name);
   if (!workstation) gaps.push("workstations_missing");
   return {
@@ -634,6 +638,8 @@ function observation(match, context, sourceUrl, observedAt, contextVerified = tr
     display_price: rate.price,
     currency: "CNY",
     availability: rate.availability,
+    tax_included: rate.tax_included,
+    cancellation_policy: rate.cancellation_policy,
     pricing_context: context,
     source_url: sourceUrl,
     observed_at: observedAt,
@@ -647,13 +653,40 @@ function observation(match, context, sourceUrl, observedAt, contextVerified = tr
 }
 
 async function fetchImage(imageUrl, pageSources, remainingBytes) {
+  let allowed;
   try {
-    const response = await fetch(imageUrl, { redirect: "follow" });
+    const url = new URL(imageUrl);
+    allowed = url.protocol === "https:" && /(^|\.)(ctrip\.com|c-ctrip\.com|ctripstatic\.com)$/i.test(url.hostname);
+  } catch {
+    allowed = false;
+  }
+  if (!allowed || remainingBytes <= 0) return null;
+  try {
+    const response = await fetch(imageUrl, { redirect: "error", signal: AbortSignal.timeout(20_000) });
     const sanitized = sanitizedPublicUrl(imageUrl);
-    if (sanitized) pageSources.push({ url: sanitized, status: response.status });
+    if (sanitized) pageSources.push({ url: sanitized, status: response.status, status_observed: true });
     if (!response.ok) return null;
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > remainingBytes) return null;
+    const advertisedBytes = Number(response.headers.get("content-length"));
+    if (Number.isFinite(advertisedBytes) && advertisedBytes > remainingBytes) return null;
+    if (!response.body) return null;
+    const reader = response.body.getReader();
+    const chunks = [];
+    let byteLength = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        byteLength += value.byteLength;
+        if (byteLength > remainingBytes) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const buffer = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), byteLength);
     let mime = compact(response.headers.get("content-type") || "", 100).split(";", 1)[0].toLowerCase();
     if (!/^image\/(jpeg|png|webp)$/.test(mime)) return null;
     return {
@@ -681,41 +714,25 @@ const DOM_FACTS_SCRIPT = `(() => {
     .filter((item) => /酒店|房型|客房|room|hotel|gallery|album/i.test(item.context))
     .filter((item) => !/avatar|logo|qrcode|二维码/i.test(item.context)).slice(0, 12);
   const blocks = []; const seen = new Set();
-  const parserCards = [];
-  const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-  for (const element of [...document.querySelectorAll('div,li,section,article')]) {
+  const rawRoomCards = [];
+  for (const element of [...document.querySelectorAll('div')]) {
+    const classTokens = String(element.className || '').split(/\\s+/);
+    if (!classTokens.some((token) => /^commonRoomCard(?:Hidden)?__/.test(token))) continue;
     const text = String(element.innerText || '').trim();
     if (!text.includes('房') || !/(￥|¥)\\s*\\d/.test(text) || text.length > 1800 || seen.has(text)) continue;
     seen.add(text);
     const roomId = element.getAttribute('data-room-id') || element.getAttribute('data-roomid') || element.getAttribute('data-room-type-id') || '';
     blocks.push({ text, room_id: roomId });
-    const lines = text.split(/\\n+/).map((line) => compact(line, 300)).filter(Boolean);
-    const roomName = lines.find((line) => line.includes('房')) || '';
-    const prices = [...text.matchAll(/(?:￥|¥)\\s*([0-9][0-9,]*)/g)].map((match) => Number(match[1].replace(/,/g, ''))).filter((value) => Number.isFinite(value) && value > 0);
-    // This is a bounded, normalized *rendered DOM observation* for the
-    // offline parser. It is not a fabricated offer: each field is copied from
-    // the current card text, and the Network/DOM equality gate remains below.
-    if (roomName && prices.length === 1) {
-      const cancellation = (text.match(/(?:免费取消|不可取消|取消[^，。\\n]{0,80})/) || [''])[0];
-      const availability = /已订完|售罄|满房|不可订/.test(text) ? 'sold_out' : (/可订|立即预订/.test(text) ? 'available' : 'unknown');
-      const tax = /含税|税费已含/.test(text) && !/不含税|另付税|税费另计/.test(text) ? '含税' : '';
-      const workstations = (text.match(/(\\d+)\\s*(?:台|机)(?:电竞)?(?:电脑|位)?/i) || ['',''])[1];
-      parserCards.push('<article data-ctrip-room-card="true"' + (roomId ? ' data-room-id="' + escapeHtml(roomId) + '"' : '') + '>' +
-        '<span data-role="room-name">' + escapeHtml(roomName) + '</span>' +
-        '<span data-role="room-price" data-price="' + prices[0] + '">¥' + prices[0] + '</span>' +
-        '<span data-role="availability" data-availability="' + availability + '">' + availability + '</span>' +
-        '<span data-role="tax-scope">' + tax + '</span>' +
-        '<span data-role="cancellation">' + escapeHtml(cancellation) + '</span>' +
-        '<span data-role="workstations"' + (workstations ? ' data-workstations="' + workstations + '"' : '') + '>' + escapeHtml(workstations) + '</span>' +
-      '</article>');
-    }
+    // Preserve only the real, bounded card outerHTML. The parser below sees
+    // no synthesized room fields and therefore cannot self-validate a record
+    // manufactured from text extracted by this same script.
+    rawRoomCards.push(element.outerHTML);
     if (blocks.length >= 80) break;
   }
-  // The parser receives only bounded public room-card observations, not the
-  // whole authenticated page. The wrapper gives its versioned registry a
-  // stable semantic root without exposing cookies or account data.
-  const roomPanelHtml = parserCards.length
-    ? '<section data-role="hotel-room-list">' + parserCards.join('') + '</section>'
+  // The wrapper is only a bounded-fragment root; all children are raw
+  // rendered Ctrip cards, never reconstructed semantic DOM.
+  const roomPanelHtml = rawRoomCards.length
+    ? '<section data-ctrip-captured-panel="true">' + rawRoomCards.join('') + '</section>'
     : '';
   return { title: document.title, body, images, room_blocks: blocks, room_panel_html: roomPanelHtml.slice(0, 950000) };
 })()`;
@@ -731,7 +748,9 @@ async function collectOne(bridge, item, request, pageSources, imageBudget) {
   const safeUrl = sanitizedPublicUrl(bookingUrl);
   try {
     await bridge.tool("get_page", { url: bookingUrl, why: "Open the explicitly mapped Ctrip property with the requested stay context." }, 120_000);
-    if (safeUrl) pageSources.push({ url: safeUrl, status: 200 });
+    // OpenCLI can bind the tab and read the rendered page but does not return
+    // an HTTP status.  Keep that distinction in the receipt.
+    if (safeUrl) pageSources.push({ url: safeUrl, status: null, status_observed: false });
     const session = `zhijing-ctrip-${String(candidate.provider_place_id).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48)}`;
     await openCli(["browser", session, "bind"], 30_000);
     const before = await openCli(["browser", session, "network", "--since", "2m"], 30_000);
@@ -779,8 +798,8 @@ async function collectOne(bridge, item, request, pageSources, imageBudget) {
         nightly_price: row.display_price,
         availability: row.availability,
         currency: "CNY",
-        tax_included: true,
-        cancellation_policy: "页面与网络均已验证",
+        tax_included: row.tax_included,
+        cancellation_policy: row.cancellation_policy,
         pricing_context: request.pricing_context,
         source_url: safeUrl,
         observed_at: observedAt,
@@ -815,6 +834,12 @@ async function collectOne(bridge, item, request, pageSources, imageBudget) {
         ...candidate,
         benchmark_selected: true,
         booking_evidence: [{ ...mapping.ota, property_url: safeUrl, observed_at: observedAt, page_title: compact(facts.title, 300) }],
+        room_type_evidence: roomTypes.map((roomType, index) => ({
+          room_type: roomType,
+          room_type_provider_id: String(mapping.ota.property_id) + ":p2-room-type:" + String(index + 1),
+          source_url: safeUrl,
+          observed_at: observedAt,
+        })),
         room_offers: contextVerified ? offers : [],
         pricing_observations: observations,
       },
@@ -918,17 +943,22 @@ async function collect(request) {
     result.competitor_report.candidate_media = outcomes.map((outcome) => outcome.media).filter(Boolean);
     result.collection_issues = outcomes.map((outcome) => outcome.issue).filter(Boolean);
     const roomTypes = outcomes.reduce((sum, outcome) => sum + outcome.roomTypes.length, 0);
+    const roomTypeObserved = outcomes.filter((outcome) => outcome.roomTypes.length > 0).length;
     const priceObserved = outcomes.filter((outcome) => outcome.contextVerified && (outcome.observations.length || outcome.noInventory)).length;
     const imageObserved = outcomes.filter((outcome) => outcome.media?.images?.length).length;
     const retryableIssues = result.collection_issues.filter((item) => item.retryable);
-    const roomTypesComplete = !request.required_evidence.room_types || roomTypes > 0;
+    const roomTypesComplete = !request.required_evidence.room_types || roomTypeObserved === selected.length;
     const imagesComplete = !request.required_evidence.images || imageObserved === selected.length;
     const pricingComplete = !request.required_evidence.pricing || priceObserved === selected.length;
     const complete = retryableIssues.length === 0 && roomTypesComplete && imagesComplete && pricingComplete;
     result.coverage = {
       candidates: coverage("complete", candidates.length),
       benchmark_set: coverage("complete", selected.length),
-      room_types: coverage(roomTypesComplete ? "complete" : "partial", roomTypes),
+      room_types: coverage(
+        roomTypesComplete ? "complete" : "partial",
+        roomTypeObserved,
+        `已识别房型条目 ${roomTypes} 条`,
+      ),
       images: coverage(imagesComplete ? "complete" : "partial", imageObserved),
       pricing: coverage(pricingComplete ? "complete" : "partial", priceObserved),
     };

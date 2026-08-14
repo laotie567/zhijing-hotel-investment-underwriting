@@ -24,9 +24,9 @@ only finance/calculation owner.
 
 ## Empty-table prevention and delivery gate
 
-Manifest `1.2` never serializes the three decision-facing tabs as silent empty
-arrays. Each now has `交付状态`; the project summary also has `交付完整性` and
-`交付待补项`.
+Manifest `1.3` never serializes the three decision-facing tabs as silent empty
+arrays. Each has `交付状态`; the project summary has `交付载荷状态`、`交付待补项`、
+`市场证据状态`、`ADR证据状态` 和 `投决准备状态`。
 
 - A missing room mix creates one `待补房型` notice. It is explicitly labelled
   non-room data and carries no invented room count, ADR or OCC.
@@ -37,19 +37,22 @@ arrays. Each now has `交付状态`; the project summary also has `交付完整�
   `待补视觉图片` notice bound to that competitor. No formal competitors creates
   one visible non-competitor visual notice instead of an empty evidence table.
 
-The manifest's top-level `delivery_gate` is the evidence readiness decision for
-these three tabs. The host must only present the run as a complete client
-delivery when `delivery_gate.final_delivery_eligible` is `true` **and** its
-post-write readback has changed the summary's `交付完整性` from `待写入核验` to
-`可交付`. This prevents a failed attachment upload from being misreported as a
-complete visual delivery. When the gate is false, the host may write the
-manifest as a draft for traceability, but must preserve the gap rows and
-`交付待补项`; it must not call the draft a completed research delivery.
+The manifest's top-level `delivery_gate` has four non-interchangeable axes:
+
+- `payload_write_eligible` only means the three tables can be written and then read back;
+- `market_evidence_status` states the collection receipt's complete/partial/failed state;
+- `adr_evidence_status` states whether strict ADR evidence is available;
+- `investment_decision_scope` stays equal to the Skill result's review/pre-evaluation scope.
+
+After a successful writeback, a host may change only `交付载荷状态` from `待写入核验` to
+`写入已核验`. It must never use an attachment readback to promote market evidence, ADR evidence,
+or an investment decision. When the payload gate is false, it may write a traceable draft but must
+preserve every gap row and `交付待补项`.
 
 For a positive gate, use `delivery_gate.expected_visual_attachment_count` and
 `delivery_gate.post_write_completion` as deterministic host checks. The host
 must match every manifest record key and link, and read back that many visual
-attachment cells before setting the summary to `可交付`.
+attachment cells before setting only the payload status to `写入已核验`.
 
 It carries forward the useful field families from the historic Zhijing Excel
 workbooks without copying their sheet formulas: `竞品调研` becomes `2km竞品` plus
@@ -96,13 +99,12 @@ competitor classification, ADR eligibility or finance.
    `data_uri` to the named attachment field. Do not download `source_url` or
    treat it as an image payload; it is a traceability link only. After a
    successful upload, set `附件状态` to `status_after_upload`.
-5. Before writing, verify or migrate the `1.2` fields: summary
-   `交付完整性`/`交付待补项`, child-table `交付状态`, and the full
-   `2km竞品` / `竞品报价与视觉证据` field definitions. After writeback, read every
-   manifest record key, record-link and attachment count back. For an eligible manifest, only then update the
-   summary from `待写入核验` to `可交付`; otherwise keep or set `待补证据` and state
-   the failed/missing item. Do not mark the project complete when the manifest
-   delivery gate is blocked.
+5. Before writing, verify or migrate the `1.3` fields: summary
+   `交付载荷状态`/`交付待补项`/`市场证据状态`/`ADR证据状态`/`投决准备状态`, child-table
+   `交付状态`, and the full `2km竞品` / `竞品报价与视觉证据` field definitions. After writeback,
+   read every manifest record key, record-link and attachment count back. For an eligible manifest, only then
+   update `交付载荷状态` from `待写入核验` to `写入已核验`; otherwise keep or set `待补证据` and
+   state the failed/missing item. Do not alter market, ADR or decision fields during writeback.
 
 The host must use the user or service identity explicitly authorised for that
 Base. The manifest has no Base token, user ID, credential, access policy or

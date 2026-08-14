@@ -223,7 +223,7 @@ def collect(request: dict[str, Any], *, engine: str, timeout_seconds: int) -> di
             raise CollectionExecutionError(
                 "OTA collector must return the exact completed 2km spatial_collection it received"
             )
-    return result
+    return market_evidence_contract.attest_collection_result(result)
 
 
 def _render(result: dict[str, Any], output_format: str) -> str:

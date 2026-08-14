@@ -20,6 +20,19 @@ const MAX_BENCHMARK_CANDIDATES = 8;
 const EARTH_RADIUS_METERS = 6_371_000;
 const MAX_EMBEDDED_BYTES = 7_500_000;
 const USER_AGENT = "Mozilla/5.0 (compatible; ZhijingMarketEvidence/1.0)";
+// Generic lodging queries prevent a narrow esports-name/category filter from
+// silently discarding nearby hotels that expose esports rooms. They define the
+// complete provider-search scope before deterministic classification.
+const LODGING_DISCOVERY_QUERIES = [
+  "酒店",
+  "民宿",
+  "客栈",
+  "公寓",
+  "电竞酒店",
+  "电竞民宿",
+  "电竞客栈",
+  "电竞公寓",
+];
 
 function now() {
   return new Date().toISOString();
@@ -93,6 +106,15 @@ function asImageDataUri(bytes, contentType) {
   return kind ? `data:image/${kind};base64,${bytes.toString("base64")}` : null;
 }
 
+function isAllowedMapImageUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && /(^|\.)(360\.cn|qhimg\.com|qhstatic\.com)$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function coverage(status, observedCount, notes) {
   const result = { status, observed_count: observedCount };
   if (notes) result.notes = notes;
@@ -104,6 +126,35 @@ function candidateIdsSha256(candidates) {
     .map((candidate) => String(candidate?.provider_place_id || ""))
     .sort();
   return createHash("sha256").update(JSON.stringify(identifiers), "utf8").digest("hex");
+}
+
+function candidateSnapshotSha256(candidates) {
+  const fields = [
+    "provider",
+    "provider_place_id",
+    "coordinate_system",
+    "longitude",
+    "latitude",
+    "property_kind",
+    "esports_positioning",
+    "operating_status",
+    "source",
+  ];
+  const snapshot = candidates
+    .map((candidate) => {
+      const item = Object.fromEntries(fields.map((field) => [field, candidate?.[field]]));
+      const source = candidate?.source || {};
+      // Field order is a cross-runtime protocol with market_evidence_contract.py.
+      item.source = Object.fromEntries([
+        ["source_platform", source.source_platform],
+        ["source_url", source.source_url],
+        ["observed_at", source.observed_at],
+        ["confidence", source.confidence],
+      ]);
+      return item;
+    })
+    .sort((left, right) => String(left.provider_place_id).localeCompare(String(right.provider_place_id), "en"));
+  return createHash("sha256").update(JSON.stringify(snapshot), "utf8").digest("hex");
 }
 
 function baseResult({ request, startedAt, engineVersion, pageSources }) {
@@ -282,6 +333,25 @@ function hasPrimaryEsportsLodgingIdentity(item) {
     || /电竞(?:酒店|民宿|客栈|住宿)/.test(`${category} ${detailText}`);
 }
 
+function isLodgingListing(item) {
+  const category = compactText(
+    [item?.cat_new_name, item?.detail?.category, item?.detail?.type]
+      .filter(Boolean)
+      .join(" "),
+    500,
+  );
+  const name = compactText(item?.name, 300);
+  return /酒店|宾馆|民宿|客栈|住宿|公寓|旅店/.test(`${category} ${name}`);
+}
+
+function mapCandidateFacts(item) {
+  return {
+    property_kind: isLodgingListing(item) ? "lodging" : "non_lodging",
+    esports_positioning: hasPrimaryEsportsLodgingIdentity(item) ? "primary" : "incidental",
+    operating_status: operatingStatusFromListing(item),
+  };
+}
+
 function operatingStatusFromListing(item) {
   // A current POI search result is the minimum operating signal. An explicit
   // closure marker always wins and is retained as an excluded candidate.
@@ -371,48 +441,54 @@ async function main() {
     }
     result.target_resolution = center;
 
-    const firstPage = await fetchJson(
-      searchUrl({
-        keyword: input.search.query,
-        cityId: input.target.city_id,
-        center,
-        radiusMeters: input.search.radius_meters,
-        batch: 1,
-      })
-    );
-    const hasKnownTotal = Number.isInteger(firstPage.totalcount) && firstPage.totalcount >= 0;
-    const total = hasKnownTotal ? firstPage.totalcount : 0;
-    // Without an explicit total the page cannot prove that pagination ended;
-    // preserve the first-page facts but never call the 2km population complete.
-    const sourceSetTruncated = !hasKnownTotal || total > input.search.max_candidates;
-    const pageCount = hasKnownTotal
-      ? Math.min(Math.ceil(total / PAGE_SIZE), Math.ceil(input.search.max_candidates / PAGE_SIZE))
-      : 1;
-    const pages = [firstPage];
-    for (let batch = 2; batch <= pageCount; batch += 1) {
-      pages.push(
-        await fetchJson(
-          searchUrl({
-            keyword: input.search.query,
-            cityId: input.target.city_id,
-            center,
-            radiusMeters: input.search.radius_meters,
-            batch,
-          })
-        )
-      );
-    }
+    const queryPlan = [...new Set([
+      input.search.query,
+      ...LODGING_DISCOVERY_QUERIES,
+    ].map((query) => compactText(query, 100)).filter(Boolean))];
     const byId = new Map();
-    for (const sourcePage of pages) {
-      for (const item of Array.isArray(sourcePage.poi) ? sourcePage.poi : []) {
-        if (typeof item?.pguid === "string") byId.set(item.pguid, item);
+    let sourceSetTruncated = false;
+    for (const query of queryPlan) {
+      const firstPage = await fetchJson(
+        searchUrl({
+          keyword: query,
+          cityId: input.target.city_id,
+          center,
+          radiusMeters: input.search.radius_meters,
+          batch: 1,
+        })
+      );
+      const hasKnownTotal = Number.isInteger(firstPage.totalcount) && firstPage.totalcount >= 0;
+      const total = hasKnownTotal ? firstPage.totalcount : 0;
+      // Without a total we cannot prove that the provider has returned every
+      // page for this particular discovery query. The receipt remains partial.
+      if (!hasKnownTotal || total > input.search.max_candidates) sourceSetTruncated = true;
+      const pageCount = hasKnownTotal
+        ? Math.min(Math.ceil(total / PAGE_SIZE), Math.ceil(input.search.max_candidates / PAGE_SIZE))
+        : 1;
+      const pages = [firstPage];
+      for (let batch = 2; batch <= pageCount; batch += 1) {
+        pages.push(
+          await fetchJson(
+            searchUrl({
+              keyword: query,
+              cityId: input.target.city_id,
+              center,
+              radiusMeters: input.search.radius_meters,
+              batch,
+            })
+          )
+        );
+      }
+      for (const sourcePage of pages) {
+        for (const item of Array.isArray(sourcePage.poi) ? sourcePage.poi : []) {
+          if (typeof item?.pguid === "string") byId.set(item.pguid, item);
+        }
       }
     }
     const observedAt = now();
     const candidates = [...byId.values()]
       .filter((item) => item.pguid !== center.provider_place_id)
-      .filter((item) => hasPrimaryEsportsLodgingIdentity(item))
-      .filter((item) => ["酒店", "客栈民宿", "住宿服务"].includes(item?.cat_new_name))
+      .filter((item) => isLodgingListing(item))
       .map((item) => ({
         item,
         distance: haversineMeters(center.longitude, center.latitude, Number(item.x), Number(item.y)),
@@ -420,9 +496,10 @@ async function main() {
       .filter(({ item, distance }) => Number.isFinite(item?.x) && Number.isFinite(item?.y) && distance <= input.search.radius_meters)
       .sort((left, right) => left.distance - right.distance)
       .slice(0, input.search.max_candidates);
+    if (byId.size > input.search.max_candidates) sourceSetTruncated = true;
 
     const selectedBenchmarks = benchmarkCandidates(
-      candidates,
+      candidates.filter(({ item }) => hasPrimaryEsportsLodgingIdentity(item)),
       input.search.max_benchmark_candidates,
     );
     const benchmarkMetadata = new Map(selectedBenchmarks.map((candidate, index) => [
@@ -437,9 +514,7 @@ async function main() {
       coordinate_system: "GCJ-02",
       longitude: Number(item.x),
       latitude: Number(item.y),
-      property_kind: "lodging",
-      esports_positioning: "primary",
-      operating_status: operatingStatusFromListing(item),
+      ...mapCandidateFacts(item),
       source: {
         source_platform: "360地图页面（聚合公开酒店资料）",
         source_url: sourceUrl(item.pguid),
@@ -451,6 +526,14 @@ async function main() {
         benchmark_rank: benchmarkMetadata.get(item.pguid).rank,
         benchmark_selection_reason: benchmarkMetadata.get(item.pguid).reason,
       } : {}),
+      room_type_evidence: benchmarkCandidateIds.has(item.pguid)
+        ? roomTypeNames(item.detail).map((roomType, index) => ({
+          room_type: roomType,
+          room_type_provider_id: String(item.pguid) + ":map-room-type:" + String(index + 1),
+          source_url: sourceUrl(item.pguid),
+          observed_at: observedAt,
+        }))
+        : [],
       room_offers: [],
       market_profile: profile(item, item.detail),
     }));
@@ -461,13 +544,40 @@ async function main() {
       if (!benchmarkCandidateIds.has(item.pguid)) continue;
       const photo = firstRoomPhoto(item.detail);
       if (!photo || input.search.max_images_per_candidate === 0) continue;
+      if (!isAllowedMapImageUrl(photo.imageUrl)) continue;
       try {
-        const response = await context.request.get(photo.imageUrl, { timeout: 20_000 });
-        pageSources.push({ url: photo.imageUrl, status: response.status() });
-        if (!response.ok()) continue;
-        const bytes = Buffer.from(await response.body());
-        if (embeddedBytes + bytes.length > MAX_EMBEDDED_BYTES) continue;
-        const dataUri = asImageDataUri(bytes, response.headers()["content-type"]);
+        // Use streaming fetch rather than Playwright's buffered API response:
+        // a forged/missing Content-Length must not make a multi-megabyte image
+        // accumulate before we can apply the global embedded-image budget.
+        const response = await fetch(photo.imageUrl, {
+          redirect: "error",
+          signal: AbortSignal.timeout(20_000),
+          headers: { "User-Agent": USER_AGENT },
+        });
+        pageSources.push({ url: photo.imageUrl, status: response.status, status_observed: true });
+        if (!response.ok || !response.body) continue;
+        const advertisedBytes = Number(response.headers.get("content-length"));
+        if (Number.isFinite(advertisedBytes) && embeddedBytes + advertisedBytes > MAX_EMBEDDED_BYTES) continue;
+        const reader = response.body.getReader();
+        const chunks = [];
+        let byteLength = 0;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            byteLength += value.byteLength;
+            if (embeddedBytes + byteLength > MAX_EMBEDDED_BYTES) {
+              await reader.cancel();
+              break;
+            }
+            chunks.push(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        if (embeddedBytes + byteLength > MAX_EMBEDDED_BYTES) continue;
+        const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), byteLength);
+        const dataUri = asImageDataUri(bytes, response.headers.get("content-type"));
         if (!dataUri) continue;
         embeddedBytes += bytes.length;
         candidateMedia.push({
@@ -494,9 +604,7 @@ async function main() {
     );
     const required = input.required_evidence;
     const gaps = [];
-    if (!hasKnownTotal) {
-      gaps.push("页面查询未返回总数；无法证明已穷尽 2km 候选分页");
-    } else if (sourceSetTruncated) {
+    if (sourceSetTruncated) {
       gaps.push(`页面查询结果超过 ${input.search.max_candidates} 家上限；2km候选集未完整收集`);
     }
     const benchmarkCandidateCount = benchmarkCandidateIds.size;
@@ -506,7 +614,12 @@ async function main() {
     if (required.images && candidateMedia.length < benchmarkCandidateCount) {
       gaps.push(`竞品图片未覆盖全部已选标杆：已取得 ${candidateMedia.length}/${benchmarkCandidateCount} 家`);
     }
-    if (required.room_types && roomTypeCount === 0) gaps.push("页面未取得可追溯的竞品房型名称");
+    const selectedRoomTypeCandidateCount = selectedBenchmarks.filter(
+      (candidate) => roomTypeNames(candidate.item.detail).length > 0,
+    ).length;
+    if (required.room_types && selectedRoomTypeCandidateCount < benchmarkCandidateCount) {
+      gaps.push(`已选标杆房型未完整采集：${selectedRoomTypeCandidateCount}/${benchmarkCandidateCount} 家`);
+    }
     // This profile deliberately has no booking checkout flow.  It may complete
     // the 2km candidate pool, but can never complete the end-to-end evidence
     // set by itself: an OTA profile must supply the shared-context room quotes.
@@ -517,12 +630,20 @@ async function main() {
     result.status = complete ? "complete" : "partial";
     result.collector.finished_at = now();
     result.coverage = {
-      candidates: coverage(sourceSetTruncated ? "partial" : "complete", formalCandidates.length),
+      candidates: coverage(
+        sourceSetTruncated ? "partial" : "complete",
+        formalCandidates.length,
+        `已执行 ${queryPlan.length} 个住宿发现查询`,
+      ),
       benchmark_set: coverage(
         benchmarkCandidateCount > 0 || candidates.length === 0 ? "complete" : "failed",
         benchmarkCandidateCount
       ),
-      room_types: coverage(roomTypeCount ? "complete" : "failed", roomTypeCount),
+      room_types: coverage(
+        selectedRoomTypeCandidateCount === benchmarkCandidateCount ? "complete" : "partial",
+        selectedRoomTypeCandidateCount,
+        `已识别房型条目 ${roomTypeCount} 条`,
+      ),
       images: coverage(
         candidateMedia.length === benchmarkCandidateCount ? "complete" : "partial",
         candidateMedia.length
@@ -547,6 +668,7 @@ async function main() {
       center,
       candidate_count: formalCandidates.length,
       candidate_ids_sha256: candidateIdsSha256(formalCandidates),
+      candidate_snapshot_sha256: candidateSnapshotSha256(formalCandidates),
     };
     result.competitor_report = {
       title: `${input.target.name}：2km纯电竞竞品页面调研`,
@@ -569,8 +691,11 @@ export {
   benchmarkCandidates,
   benchmarkSelectionReason,
   candidateIdsSha256,
+  candidateSnapshotSha256,
   candidateProvider,
   firstRoomPhoto,
   hasPrimaryEsportsLodgingIdentity,
+  isLodgingListing,
+  mapCandidateFacts,
   roomTypeNames,
 };

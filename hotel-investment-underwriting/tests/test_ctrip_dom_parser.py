@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import tempfile
 import unittest
 
 
@@ -79,27 +78,12 @@ class CtripDomParserTests(unittest.TestCase):
             result["rooms"][0],
         )
 
-    def test_layout_drift_uses_only_a_previously_saved_container_as_an_adaptive_candidate(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            store = Path(directory) / "adaptive.sqlite"
-            run_parser(
-                payload("room-panel-v1.html"),
-                "--adaptive-store",
-                str(store),
-                "--save-adaptive",
-            )
+    def test_layout_drift_fails_closed_instead_of_using_stale_adaptive_selector_state(self) -> None:
+        result = run_parser(payload("room-panel-v1-layout-drift.html"))
 
-            result = run_parser(
-                payload("room-panel-v1-layout-drift.html"),
-                "--adaptive-store",
-                str(store),
-                "--enable-adaptive",
-            )
-
-        self.assertEqual("adaptive", result["room_container"]["selector_source"])
-        self.assertTrue(result["room_container"]["adaptive_recovered"])
-        self.assertEqual(328, result["rooms"][0]["display_price"])
-        self.assertTrue(result["rooms"][0]["requires_cross_validation"])
+        self.assertEqual("schema_drift", result["status"])
+        self.assertEqual("missing", result["room_container"]["selector_source"])
+        self.assertFalse(result["room_container"]["adaptive_recovered"])
 
     def test_parser_is_offline_and_rejects_a_non_http_source_identity(self) -> None:
         value = payload("room-panel-v1.html")
@@ -136,8 +120,8 @@ class CtripDomParserTests(unittest.TestCase):
     def test_missing_tax_text_is_unknown_not_an_inferred_tax_exclusion(self) -> None:
         value = payload("room-panel-v1.html")
         value["dom_fragment"] = value["dom_fragment"].replace(
-            '<span data-testid="tax-scope">含税</span>',
-            '<span data-testid="tax-scope"></span>',
+            '<span class="tax__scope">含税</span>',
+            '<span class="tax__scope"></span>',
         )
 
         result = run_parser(value)

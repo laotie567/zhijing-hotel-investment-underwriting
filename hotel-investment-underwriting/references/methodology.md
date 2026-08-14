@@ -60,11 +60,12 @@ after the replaced traditional-room contribution once, and only once.
   sustained payback as the primary signals.
 - Sustained payback is the earliest point after which cumulative cash flow does
   not turn negative again.
-- `static_payback_months` follows the original company investment workbook's
-  `回款周期/月` convention: initial one-time CapEx divided by first-year average
-  monthly operating net cash. It deliberately excludes later equipment
-  replacement and terminal value, and returns both the raw month value and a
-  conservative whole-month value rounded up.
+- `static_payback_months` follows the current project's `回款周期/月` convention:
+  initial one-time CapEx divided by first-year average monthly operating net
+  cash. It deliberately excludes later equipment replacement and terminal
+  value, and returns both the raw month value and a conservative whole-month
+  value rounded up. The implementation preserves the historic workbook's field
+  meaning, but is not an independent reconstruction or audit of its formulas.
 - `discounted_payback_months` is the existing discounted sustained-payback
   result expressed as months (`1 year = 12 months`) and likewise returns a
   conservative whole-month value. It retains the annual cash-flow model's

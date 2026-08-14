@@ -6,6 +6,7 @@ import copy
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -18,6 +19,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import collect_market_evidence  # noqa: E402
 import market_evidence_contract  # noqa: E402
+
+
+ATTESTATION_KEY = "market-evidence-test-key-with-at-least-32-bytes"
 
 
 def request() -> dict:
@@ -85,6 +89,9 @@ def request() -> dict:
         "candidate_ids_sha256": hashlib.sha256(
             json.dumps(identifiers, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         ).hexdigest(),
+        "candidate_snapshot_sha256": market_evidence_contract._candidate_snapshot_sha256(
+            [item["candidate"] for item in value["candidate_inventory"]]
+        ),
     }
     return value
 
@@ -119,7 +126,20 @@ def result() -> dict:
             "confirmed_location": request()["target"]["center"],
             "collection_status": "complete",
             "pricing_context": request()["pricing_context"],
-            "candidates": [copy.deepcopy(request()["candidate_inventory"][0]["candidate"])],
+            "candidates": [
+                {
+                    **copy.deepcopy(request()["candidate_inventory"][0]["candidate"]),
+                    "benchmark_selected": True,
+                    "room_type_evidence": [
+                        {
+                            "room_type": "双人电竞房",
+                            "room_type_provider_id": "candidate-001:room-1",
+                            "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=133623094",
+                            "observed_at": timestamp,
+                        }
+                    ],
+                }
+            ],
         },
         "competitor_report": {"candidate_media": []},
         "spatial_collection": request()["candidate_pool"],
@@ -161,7 +181,11 @@ class CtripLiveRatesTests(unittest.TestCase):
             captured["timeout"] = timeout
             return result()
 
-        with patch.object(collect_market_evidence, "_run_process", side_effect=fake_runner), patch.object(
+        with patch.dict(
+            os.environ,
+            {"MARKET_EVIDENCE_RECEIPT_HMAC_KEY": ATTESTATION_KEY},
+            clear=True,
+        ), patch.object(collect_market_evidence, "_run_process", side_effect=fake_runner), patch.object(
             collect_market_evidence.market_evidence_runtime, "require_ready"
         ):
             collected = collect_market_evidence.collect(request(), engine="ctrip-live-rates", timeout_seconds=120)
@@ -170,6 +194,7 @@ class CtripLiveRatesTests(unittest.TestCase):
         self.assertEqual("node", captured["command"][0])
         self.assertTrue(str(captured["command"][1]).endswith("ctrip_live_rates.mjs"))
         self.assertEqual(120, captured["timeout"])
+        self.assertIn("attestation", collected)
 
     def test_network_and_dom_must_match_before_an_offer_is_adr_eligible(self) -> None:
         script = """
@@ -194,6 +219,32 @@ console.log(JSON.stringify({observation: observation(match, context, 'https://ho
         self.assertTrue(value["observation"]["price_match"])
         self.assertTrue(value["observation"]["adr_eligible"])
         self.assertEqual(2, value["observation"]["workstations"])
+
+    def test_tax_scope_conflict_or_total_stay_price_never_becomes_a_p2_adr_offer(self) -> None:
+        script = """
+import { networkRates, observation } from './collector/ctrip_live_rates.mjs';
+const context = {check_in_date:'2026-08-20',nights:2,guests:2,currency:'CNY'};
+const conflict = observation({
+  network:{room_id:'room-2',room_name:'双人电竞房',rate_plan_name:'可取消',price:300,availability:'available',tax_included:false,cancellation_policy:'免费取消'},
+  dom:{room_id:'room-2',room_name:'双人电竞房',price:300,availability:'available',tax_included:true,cancellation_policy:'免费取消',workstations:2},
+  price_match:true
+}, context, 'https://hotels.ctrip.com/hotels/detail/?hotelId=1', '2026-08-13T00:00:00Z');
+const totalOnly = networkRates({roomName:'双人电竞房',totalPrice:600,available:true,cancelPolicy:'免费取消',taxInfo:'含税'}, '/room-list');
+console.log(JSON.stringify({conflict, totalOnly}));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        value = json.loads(completed.stdout)
+
+        self.assertFalse(value["conflict"]["adr_eligible"])
+        self.assertIn("tax_scope_mismatch", value["conflict"]["qualification_gaps"])
+        self.assertEqual([], value["totalOnly"])
 
     def test_unverified_page_context_never_marks_a_p2_observation_adr_eligible(self) -> None:
         script = """
@@ -468,6 +519,27 @@ console.log(JSON.stringify(candidateProvider({provider:'360-map-v1'})));
 
         self.assertEqual("360-map-v1", json.loads(completed.stdout))
 
+    def test_360_discovery_retains_incidental_lodging_for_auditable_exclusion(self) -> None:
+        script = """
+import { mapCandidateFacts } from './collector/playwright_360_map.mjs';
+const generic = mapCandidateFacts({name:'万达智选酒店（含电竞房）', cat_new_name:'酒店', detail:{category:'住宿服务'}});
+const primary = mapCandidateFacts({name:'星际电竞酒店', cat_new_name:'酒店', detail:{category:'住宿服务'}});
+console.log(JSON.stringify({generic, primary}));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+        )
+        value = json.loads(completed.stdout)
+
+        self.assertEqual("lodging", value["generic"]["property_kind"])
+        self.assertEqual("incidental", value["generic"]["esports_positioning"])
+        self.assertEqual("primary", value["primary"]["esports_positioning"])
+
     def test_ego_uses_the_map_pool_proof_not_an_inventory_length_heuristic(self) -> None:
         source = (ROOT / "collector" / "ego_ctrip.mjs").read_text(encoding="utf-8")
 
@@ -476,6 +548,14 @@ console.log(JSON.stringify(candidateProvider({provider:'360-map-v1'})));
             "inventory.length > 0 && inventory.length < request.search.max_candidates",
             source,
         )
+
+    def test_p2_dom_parser_receives_raw_room_card_outerhtml_not_reconstructed_semantic_markup(self) -> None:
+        source = (ROOT / "collector" / "ctrip_live_rates.mjs").read_text(encoding="utf-8")
+
+        self.assertIn("rawRoomCards.push(element.outerHTML)", source)
+        self.assertIn('data-ctrip-captured-panel="true"', source)
+        self.assertNotIn("parserCards", source)
+        self.assertNotIn('data-role="room-price"', source)
 
     def test_price_difference_does_not_become_an_adr_offer(self) -> None:
         script = """

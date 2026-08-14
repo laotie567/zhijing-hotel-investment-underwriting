@@ -87,6 +87,7 @@ class ReleaseArchiveTests(unittest.TestCase):
 
         probe_paths = (
             "customer-input.xlsx",
+            ".feishu-e2e-write.example/bitable-delivery.json",
             "hotel-investment-underwriting/customer-input.docx",
             "hotel-investment-underwriting/collector/page-capture.png",
         )

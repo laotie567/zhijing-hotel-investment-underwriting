@@ -66,7 +66,8 @@ Profile；不要加入地图/OTA SDK、未验证的爬虫、数据库、审批�
 git status --short
 git diff --check
 git diff --stat
-git add -A
+# 仅暂存本次审核过的生产代码、测试与文档；不要把临时结果或客户资料一并加入索引。
+git add <intended-files>
 
 python3 /path/to/skill-creator/scripts/quick_validate.py hotel-investment-underwriting
 
@@ -76,7 +77,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
 git diff --cached --check
 ```
 
-归档边界测试使用暂存树，故 `git add -A` 必须在测试前执行；测试以生产子目录 archive
+归档边界测试使用暂存树，故明确的发布文件必须在测试前暂存；测试以生产子目录 archive
 做精确白名单比对，并额外核验根 archive 的客户 Office/图片排除属性。若修改冻结财务机械，
 额外执行 Golden Master；不要新增状态、审批、回放或未纳入页面采集契约的爬虫实现
 到当前发布路径。发布归档采用精确白名单，新增包内文件时必须同时说明业务必要性、

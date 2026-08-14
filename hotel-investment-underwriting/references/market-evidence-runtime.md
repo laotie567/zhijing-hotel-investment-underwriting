@@ -6,6 +6,11 @@ Codex Computer Use；Hermes、OpenAI Agent 或其他宿主只需调用该命令�
 
 ## 先做预检
 
+采集回执必须由当前部署宿主签名。首次部署还要在 Hermes 或 macOS 服务环境中设置
+MARKET_EVIDENCE_RECEIPT_HMAC_KEY 为至少 32 字节的随机值，并重启宿主；不要把它写入
+.env 示例、请求 JSON、Skill 输入、HTML 或 Git。任何引擎预检只有浏览器依赖和这个密钥均为
+ready 时才能采集；缺密钥会给出 action_required，而不是产出可被 run.py 拒绝的未签名回执。
+
 在新 Mac Mini 的仓库根目录，先验收默认 OTA Profile：
 
 ```bash
@@ -33,7 +38,8 @@ python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
 
 ## 受控的两阶段采集
 
-1. 用 `360-map-v1` 建立 **全量 2km 候选集**。它对每家候选保留同源地图实体、坐标
+1. 用 360-map-v1 建立 **全量 2km 住宿候选集**。它以酒店、民宿、客栈、公寓及电竞住宿
+发现词组查询并去重，对每家候选保留同源地图实体、坐标
    和来源，再按公开房图、房型披露、评分/点评信号和距离的固定顺序选出
    `benchmark_selected` 标杆，**最多 8 家**；不要求所有泛候选都有图片或价格。
 2. 将全量候选放进 `candidate_inventory`。`ctrip-hotel-v1` 仍要求每个选中标杆先写入
@@ -132,10 +138,11 @@ Playwright 认证上下文或其他显式页面适配器，而不是模拟 Ego �
 
 `collection_result.status` 是五类覆盖度的总状态；`competitor_analysis.collection_status`
 与 `spatial_collection.status` 只判断 2km 空间候选池；后者必须与 OTA 请求的
-`candidate_pool` 精确相同。故 OTA 的 P1/售罄/登录门槛可令回执保持 `partial`，但不能抹掉
+candidate_pool 精确相同（包括候选不可变事实快照 SHA-256）。故 OTA 的 P1/售罄/登录门槛可令回执保持 partial，但不能抹掉
 已完整的 2km 竞品集合或其已经取得的视觉证据；它只会令 ADR 保持不可用。
 
-图片交付为内嵌 JPEG/PNG/WebP，附来源 URL、采集时间、MIME 与 SHA-256；报价附
+图片交付为内嵌 JPEG/PNG/WebP，附来源 URL、采集时间、MIME 与 SHA-256；图片下载仅接受
+批准的 HTTPS 平台 CDN、禁止重定向并受总字节预算限制。报价附
 OTA 房源/房型 ID、可订状态、税费、取消政策、来源 URL 和时间。只有这些字段与
 统一 `pricing_context` 都完整时，Skill 才允许进入 ADR 样本；即使满足也仍需三家
 独立的中/高置信度正式竞品。

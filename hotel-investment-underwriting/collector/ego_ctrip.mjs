@@ -67,22 +67,52 @@ function dataUri(buffer, contentType) {
   return { data_uri: `data:${mime};base64,${Buffer.from(buffer).toString("base64")}`, mime_type: mime };
 }
 
-async function fetchImage(imageUrl, pageSources, remainingBytes) {
+function isAllowedCtripAssetUrl(value) {
   try {
-    const response = await fetch(imageUrl, { redirect: "follow" });
+    const url = new URL(value);
+    // Image references are data received from a third-party page.  Never let
+    // them turn the collector into an internal-network fetcher.
+    return url.protocol === "https:" && /(^|\.)(ctrip\.com|c-ctrip\.com|ctripstatic\.com)$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+async function fetchImage(imageUrl, pageSources, remainingBytes) {
+  if (!isAllowedCtripAssetUrl(imageUrl) || remainingBytes <= 0) return null;
+  try {
+    const response = await fetch(imageUrl, { redirect: "error", signal: AbortSignal.timeout(20_000) });
     const status = response.status;
-    pageSources.push({ url: imageUrl, status });
+    pageSources.push({ url: imageUrl, status, status_observed: true });
     if (!response.ok) return null;
-    const body = await response.arrayBuffer();
-    if (body.byteLength > remainingBytes) return null;
+    const advertisedBytes = Number(response.headers.get("content-length"));
+    if (Number.isFinite(advertisedBytes) && advertisedBytes > remainingBytes) return null;
+    if (!response.body) return null;
+    const reader = response.body.getReader();
+    const chunks = [];
+    let byteLength = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        byteLength += value.byteLength;
+        if (byteLength > remainingBytes) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const body = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), byteLength);
     const image = dataUri(body, response.headers.get("content-type"));
     return image ? {
       ...image,
-      sha256: createHash("sha256").update(Buffer.from(body)).digest("hex"),
-      bytes: body.byteLength,
+      sha256: createHash("sha256").update(body).digest("hex"),
+      bytes: byteLength,
     } : null;
   } catch {
-    pageSources.push({ url: imageUrl, status: 599 });
     return null;
   }
 }
@@ -250,6 +280,7 @@ const gaps = [];
 const collectionIssues = [];
 let imageCount = 0;
 let roomTypeCount = 0;
+let roomTypeObservedCandidateCount = 0;
 let pricedCandidateCount = 0;
 let observedPriceCandidateCount = 0;
 let noInventoryCandidateCount = 0;
@@ -263,7 +294,10 @@ for (const item of selected) {
   try {
     await openOrReuseTab(bookingUrl, { wait: true, timeout: 35 });
     await waitForNetworkIdle({ timeout: 10 }).catch(() => undefined);
-    pageSources.push({ url: bookingUrl, status: 200 });
+    // Ego's tab control confirms navigation but does not expose an HTTP
+    // response object.  Preserve URL provenance while explicitly marking the
+    // status as unobserved; a synthetic 200 is not evidence.
+    pageSources.push({ url: bookingUrl, status: null, status_observed: false });
     const facts = await extractPageFacts(request.search.max_images_per_candidate);
     const observedAt = now();
     const checkoutDate = addNights(request.pricing_context.check_in_date, request.pricing_context.nights);
@@ -291,6 +325,7 @@ for (const item of selected) {
       }))
       .filter((item) => item.room_type);
     roomTypeCount += candidate.room_type_evidence.length;
+    if (candidate.room_type_evidence.length) roomTypeObservedCandidateCount += 1;
     const pricingObservations = requestedContextVisible
       ? pagePriceObservations(
         facts.room_price_cards,
@@ -372,7 +407,7 @@ for (const item of selected) {
       ));
     }
   } catch (error) {
-    pageSources.push({ url: bookingUrl, status: 599 });
+    pageSources.push({ url: bookingUrl, status: null, status_observed: false });
     gaps.push(`${candidate.name || candidate.provider_place_id}：OTA 页面采集失败（${text(String(error), 240)}）`);
     collectionIssues.push(issue(
       "RPA_FAILED",
@@ -385,7 +420,9 @@ for (const item of selected) {
 
 if (!inventory.length) gaps.push("Ego OTA Profile requires candidate_inventory from the completed 2km map collection");
 if (!selected.length && inventory.length) gaps.push("未选择任何价格/视觉标杆；请提供带 ota_property 的 benchmark_selected 候选");
-if (request.required_evidence.room_types && roomTypeCount === 0) gaps.push("已选标杆未取得可追溯房型名称");
+if (request.required_evidence.room_types && roomTypeObservedCandidateCount < selected.length) {
+  gaps.push(`已选标杆房型未完整采集：${roomTypeObservedCandidateCount}/${selected.length} 家`);
+}
 if (request.required_evidence.images && media.length < selected.length) gaps.push(`标杆图片未完整采集：${media.length}/${selected.length} 家`);
 const pricingResolvedCandidateCount = observedPriceCandidateCount + noInventoryCandidateCount;
 if (request.required_evidence.pricing && pricingResolvedCandidateCount < selected.length) {
@@ -401,7 +438,11 @@ result.collector.finished_at = now();
 result.coverage = {
   candidates: coverage(inventory.length ? "complete" : "failed", candidates.length),
   benchmark_set: coverage(selected.length ? "complete" : "failed", selected.length),
-  room_types: coverage(roomTypeCount ? "complete" : "failed", roomTypeCount),
+  room_types: coverage(
+    roomTypeObservedCandidateCount === selected.length && selected.length ? "complete" : "partial",
+    roomTypeObservedCandidateCount,
+    `已识别房型条目 ${roomTypeCount} 条`,
+  ),
   images: coverage(media.length === selected.length && selected.length ? "complete" : "partial", imageCount),
   pricing: coverage(
     noInventoryCandidateCount === selected.length && selected.length ? "complete" : "partial",

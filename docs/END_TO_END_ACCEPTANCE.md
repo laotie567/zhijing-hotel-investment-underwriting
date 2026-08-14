@@ -15,7 +15,7 @@
 
 | 阶段 | 选定引擎/Profile | 当次结果 | 结论 |
 |---|---|---|---|
-| 2km 候选 | Playwright / `360-map-v1` | 确认 GCJ-02 中心点、全量候选、`spatial_collection`（中心/数量/ID 指纹） | 可追溯的完整空间候选池 |
+| 2km 候选 | Playwright / `360-map-v1` | 以住宿发现词组确认 GCJ-02 中心点、全量候选、`spatial_collection`（中心/数量/ID 指纹/不可变快照） | 可追溯的完整空间候选池 |
 | OTA 标杆 | **Ego Lite / `ctrip-hotel-v1`（默认）**；可选 Ui.Vision+OpenCLI / `ctrip-live-rates-v1` | 将**全量**候选作为 `candidate_inventory`，并原样传入 `candidate_pool`；仅最多 8 个已选标杆采集房型/图片/报价 | CLI 验证回传池、引擎/Profile与中心一致；图片可进入 HTML/Base 附件 |
 | 同条件价格 | Ego 默认 OTA Profile | 登录、验证码、页面未回显日期/人数或明确无可订房 | 登录/口径缺失为 `partial`；P1 观察保留但不得形成 ADR。`NO_INVENTORY` 是已完成的负向价格结果，ADR 仍保持为空 |
 | 投测和交付 | `run.py` | 基准输入的财务机械、HTML、Bitable manifest | 空间池完整时为 `ready_for_review`；缺价格/图片会保留待补项和空 ADR，不自动改写财务 |
@@ -32,7 +32,7 @@
    python3 scripts/collect_market_evidence.py --preflight --engine ego-browser
    ```
 
-2. 以 `--engine playwright` 提交 `360-map-v1` 请求。保存 `--format result` 的 JSON，
+2. 在服务环境设置至少 32 字节的 `MARKET_EVIDENCE_RECEIPT_HMAC_KEY` 后，以 `--engine playwright` 提交 `360-map-v1` 请求。保存 `--format result` 的 JSON，
    并检查 `target_resolution`、`collector.page_sources`、`coverage.candidates` 与每一条
    候选的同源 GCJ-02 坐标/来源。
 
@@ -59,8 +59,8 @@
 
 ## 通过与待补的判定
 
-- **通过页面技术链路**：每段 JSON 都有匹配的 `collector.engine`、Profile、真实页面
-  URL/HTTP 状态和带时区时间；所有图片都有 URL、MIME、SHA-256；HTML 可在无 Skill
+- **通过页面技术链路**：每段 JSON 都有可由当前宿主验证的 HMAC、匹配的 `collector.engine`、Profile、真实页面
+  URL/HTTP 状态（或明确未观察）和带时区时间；所有图片都有 URL、MIME、SHA-256；HTML 可在无 Skill
   目录的设备上打开。
 - **通过空间市场结论**：全量候选完成，且 OTA 回执原样返回匹配的 `spatial_collection`；
   此时可审阅正式竞品集合。

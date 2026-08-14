@@ -10,6 +10,7 @@ import copy
 import hashlib
 import io
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -22,7 +23,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import bitable_delivery  # noqa: E402
+import market_evidence_contract  # noqa: E402
 import run  # noqa: E402
+
+
+ATTESTATION_KEY = "market-evidence-test-key-with-at-least-32-bytes"
 
 
 def complete_competitor_input() -> dict:
@@ -62,37 +67,44 @@ def complete_competitor_input() -> dict:
                             "guests": 2,
                             "currency": "CNY",
                         },
-                        "source_url": "https://m.ctrip.com/html5/hotel/hoteldetail/example.html",
+                        "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
                         "observed_at": "2026-08-12T09:10:00+08:00",
                     }
                 ],
-                "pricing_observations": (
-                    [
-                        {
-                            "room_type": "双人电竞房",
-                            "room_type_provider_id": f"P-{index}:room-2",
-                            "price_type": "P2",
-                            "display_price": price,
+                "pricing_observations": [
+                    {
+                        "room_type": "双人电竞房",
+                        "room_type_provider_id": f"P-{index}:room-2",
+                        "price_type": "P2",
+                        "display_price": price,
+                        "currency": "CNY",
+                        "availability": "available",
+                        "tax_included": True,
+                        "cancellation_policy": "免费取消",
+                        "pricing_context": {
+                            "check_in_date": "2026-08-26",
+                            "nights": 1,
+                            "guests": 2,
                             "currency": "CNY",
-                            "availability": "available",
-                            "pricing_context": {
-                                "check_in_date": "2026-08-26",
-                                "nights": 1,
-                                "guests": 2,
-                                "currency": "CNY",
-                            },
-                            "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
-                            "observed_at": "2026-08-12T09:10:00+08:00",
-                            "network_verified": True,
-                            "dom_verified": True,
-                            "price_match": True,
-                            "adr_eligible": False,
-                            "qualification_gaps": ["tax_scope_unknown"],
-                        }
-                    ]
-                    if index == 1
-                    else []
-                ),
+                        },
+                        "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                        "observed_at": "2026-08-12T09:10:00+08:00",
+                        "network_verified": True,
+                        "dom_verified": True,
+                        "price_match": True,
+                        "adr_eligible": True,
+                        "qualification_gaps": [],
+                    }
+                ],
+                "benchmark_selected": True,
+                "room_type_evidence": [
+                    {
+                        "room_type": "双人电竞房",
+                        "room_type_provider_id": f"P-{index}:room-type-1",
+                        "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                        "observed_at": "2026-08-12T09:10:00+08:00",
+                    }
+                ],
                 "market_profile": {
                     "meituan_badge": "金冠",
                     "opening_or_renovation": "2025年装修",
@@ -162,11 +174,11 @@ def page_receipt(competitors: dict, report: dict) -> dict:
     ).hexdigest()
     return {
         "contract_version": "market-evidence-collection/v2",
-        "status": "partial",
+        "status": "complete",
         "collector": {
-            "engine": "ego-browser",
+            "engine": "ctrip-live-rates",
             "engine_version": "test",
-            "source_profile": "ctrip-hotel-v1",
+            "source_profile": "ctrip-live-rates-v1",
             "started_at": timestamp,
             "finished_at": timestamp,
             "page_sources": [{"url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1", "status": 200}],
@@ -177,9 +189,9 @@ def page_receipt(competitors: dict, report: dict) -> dict:
             "benchmark_set": {"status": "complete", "observed_count": len(candidates)},
             "room_types": {"status": "complete", "observed_count": len(candidates)},
             "images": {"status": "complete", "observed_count": len(candidates)},
-            "pricing": {"status": "partial", "observed_count": 0},
+            "pricing": {"status": "complete", "observed_count": len(candidates)},
         },
-        "collection_gaps": ["测试回执：严格报价仍待补齐"],
+        "collection_gaps": [],
         "competitor_analysis": competitors,
         "competitor_report": report,
         "spatial_collection": {
@@ -189,10 +201,17 @@ def page_receipt(competitors: dict, report: dict) -> dict:
             "center": center,
             "candidate_count": len(candidates),
             "candidate_ids_sha256": candidate_ids_sha256,
+            "candidate_snapshot_sha256": market_evidence_contract._candidate_snapshot_sha256(candidates),
         },
     }
 class BitableDeliveryTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._attestation_environment = patch.dict(
+            os.environ,
+            {"MARKET_EVIDENCE_RECEIPT_HMAC_KEY": ATTESTATION_KEY},
+        )
+        self._attestation_environment.start()
+        self.addCleanup(self._attestation_environment.stop)
         self.project_input = json.loads(
             (ROOT / "references" / "sample-predeal-hotel.json").read_text(
                 encoding="utf-8"
@@ -207,12 +226,24 @@ class BitableDeliveryTests(unittest.TestCase):
     def _request(self) -> dict:
         competitors = complete_competitor_input()
         report = competitor_report_input()
+        receipt = market_evidence_contract.attest_collection_result(
+            page_receipt(competitors, report)
+        )
         return {
             "project_input": copy.deepcopy(self.project_input),
-            "market_evidence": page_receipt(competitors, report),
+            "market_evidence": receipt,
             "competitor_analysis": competitors,
             "competitor_report": report,
         }
+
+    def _refresh_attestation(self, request: dict) -> None:
+        """Re-bind deliberate fixture edits to the host-issued test receipt."""
+
+        receipt = request["market_evidence"]
+        receipt.pop("attestation", None)
+        receipt["competitor_analysis"] = request["competitor_analysis"]
+        receipt["competitor_report"] = request["competitor_report"]
+        request["market_evidence"] = market_evidence_contract.attest_collection_result(receipt)
 
     def test_manifest_contains_the_standard_template_and_all_delivery_tables(self) -> None:
         request = self._request()
@@ -220,13 +251,16 @@ class BitableDeliveryTests(unittest.TestCase):
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)
 
-        self.assertEqual("1.2", manifest["manifest_version"])
+        self.assertEqual("1.3", manifest["manifest_version"])
         self.assertEqual("skill_is_calculation_owner", manifest["write_policy"]["calculation_owner"])
-        self.assertTrue(manifest["delivery_gate"]["final_delivery_eligible"])
+        self.assertTrue(manifest["delivery_gate"]["payload_write_eligible"])
         self.assertEqual(
             "待写入核验",
-            manifest["records"]["项目测算总表"][0]["交付完整性"],
+            manifest["records"]["项目测算总表"][0]["交付载荷状态"],
         )
+        self.assertEqual("complete", manifest["delivery_gate"]["market_evidence_status"])
+        self.assertEqual("available", manifest["delivery_gate"]["adr_evidence_status"])
+        self.assertEqual("ready_for_review", manifest["delivery_gate"]["investment_decision_scope"])
         self.assertEqual(3, manifest["delivery_gate"]["expected_visual_attachment_count"])
         self.assertEqual(
             {
@@ -301,6 +335,7 @@ class BitableDeliveryTests(unittest.TestCase):
         request["competitor_analysis"]["candidates"][0]["benchmark_selection_reason"] = (
             "固定标杆排序：有公开房型图；距目标111米"
         )
+        self._refresh_attestation(request)
         result = run.run(request, defaults=self.defaults)
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)
@@ -325,8 +360,8 @@ class BitableDeliveryTests(unittest.TestCase):
         self.assertEqual("双人电竞大床房", room_type["房型"])
         self.assertTrue(room_type["DOM已验证"])
         observation = next(row for row in evidence if row["证据类型"] == "价格观察")
-        self.assertFalse(observation["可进入ADR"])
-        self.assertEqual("tax_scope_unknown", observation["ADR排除原因"])
+        self.assertTrue(observation["可进入ADR"])
+        self.assertEqual("", observation["ADR排除原因"])
 
     def test_attachment_file_extension_and_name_are_safe_for_the_validated_image_types(self) -> None:
         self.assertEqual("jpg", bitable_delivery._image_extension("data:image/jpeg;base64,AA=="))
@@ -366,12 +401,15 @@ class BitableDeliveryTests(unittest.TestCase):
 
         self.assertEqual("pre_evaluation_only", summary["结论范围"])
         self.assertEqual("needs_location_confirmation", summary["2km竞品状态"])
-        self.assertEqual("待补证据", summary["交付完整性"])
+        self.assertEqual("待补证据", summary["交付载荷状态"])
         self.assertIn("2km竞品", summary["交付待补项"])
         self.assertEqual("已提供", manifest["records"]["房型配置"][0]["交付状态"])
         self.assertEqual("待补2km竞品", manifest["records"]["2km竞品"][0]["交付状态"])
         self.assertEqual("待补视觉图片", manifest["records"]["竞品报价与视觉证据"][0]["交付状态"])
-        self.assertFalse(manifest["delivery_gate"]["final_delivery_eligible"])
+        self.assertFalse(manifest["delivery_gate"]["payload_write_eligible"])
+        self.assertEqual("not_collected", manifest["delivery_gate"]["market_evidence_status"])
+        self.assertEqual("not_collected", manifest["delivery_gate"]["adr_evidence_status"])
+        self.assertEqual("pre_evaluation_only", manifest["delivery_gate"]["investment_decision_scope"])
 
     def test_delivery_manifest_writes_a_visible_room_type_gap_when_room_mix_is_missing(self) -> None:
         request = self._request()
@@ -393,6 +431,13 @@ class BitableDeliveryTests(unittest.TestCase):
         # report payload.
         request["market_evidence"]["competitor_report"]["candidate_media"] = []
         request["competitor_report"] = request["market_evidence"]["competitor_report"]
+        request["market_evidence"]["status"] = "partial"
+        request["market_evidence"]["coverage"]["images"] = {
+            "status": "partial",
+            "observed_count": 0,
+        }
+        request["market_evidence"]["collection_gaps"] = ["竞品图片待补齐"]
+        self._refresh_attestation(request)
         result = run.run(request, defaults=self.defaults)
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)
@@ -405,7 +450,7 @@ class BitableDeliveryTests(unittest.TestCase):
         self.assertEqual(3, len(pending))
         self.assertTrue(all(row["附件状态"] == "无附件" for row in pending))
         self.assertEqual("待补证据", manifest["delivery_gate"]["status"])
-        self.assertFalse(manifest["delivery_gate"]["final_delivery_eligible"])
+        self.assertFalse(manifest["delivery_gate"]["payload_write_eligible"])
 
     def test_delivery_gate_requires_images_only_for_explicit_deep_research_benchmarks(self) -> None:
         request = self._request()
@@ -414,6 +459,11 @@ class BitableDeliveryTests(unittest.TestCase):
         request["competitor_report"]["candidate_media"] = [
             request["competitor_report"]["candidate_media"][0]
         ]
+        request["market_evidence"]["coverage"]["benchmark_set"]["observed_count"] = 1
+        request["market_evidence"]["coverage"]["room_types"]["observed_count"] = 1
+        request["market_evidence"]["coverage"]["images"]["observed_count"] = 1
+        request["market_evidence"]["coverage"]["pricing"]["observed_count"] = 1
+        self._refresh_attestation(request)
         result = run.run(request, defaults=self.defaults)
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)
@@ -424,12 +474,42 @@ class BitableDeliveryTests(unittest.TestCase):
         ]
 
         self.assertEqual([], pending)
-        self.assertTrue(manifest["delivery_gate"]["final_delivery_eligible"])
+        self.assertTrue(manifest["delivery_gate"]["payload_write_eligible"])
+
+    def test_payload_write_verification_never_promotes_partial_adr_evidence_to_decision_evidence(self) -> None:
+        request = self._request()
+        request["market_evidence"]["status"] = "partial"
+        request["market_evidence"]["coverage"]["pricing"] = {
+            "status": "partial",
+            "observed_count": 0,
+        }
+        request["market_evidence"]["collection_gaps"] = ["P2 同条件价格仍待补齐"]
+        for candidate in request["competitor_analysis"]["candidates"]:
+            candidate["room_offers"] = []
+            candidate["pricing_observations"] = []
+        self._refresh_attestation(request)
+        result = run.run(request, defaults=self.defaults)
+
+        manifest = bitable_delivery.build_manifest(result, request, self.defaults)
+
+        self.assertTrue(manifest["delivery_gate"]["payload_write_eligible"])
+        self.assertEqual("partial", manifest["delivery_gate"]["market_evidence_status"])
+        self.assertEqual("partial", manifest["delivery_gate"]["adr_evidence_status"])
+        self.assertEqual(
+            "ready_for_review",
+            manifest["delivery_gate"]["investment_decision_scope"],
+        )
+        self.assertEqual(
+            "待写入核验",
+            manifest["records"]["项目测算总表"][0]["交付载荷状态"],
+        )
 
     def test_partial_competitor_collection_writes_a_visible_collection_gap(self) -> None:
         request = self._request()
         request["competitor_analysis"]["collection_status"] = "partial"
+        request["market_evidence"]["status"] = "partial"
         request["market_evidence"]["spatial_collection"]["status"] = "partial"
+        self._refresh_attestation(request)
         result = run.run(request, defaults=self.defaults)
 
         manifest = bitable_delivery.build_manifest(result, request, self.defaults)
@@ -446,6 +526,7 @@ class BitableDeliveryTests(unittest.TestCase):
     def test_bitable_rejects_malformed_delivery_only_market_profile(self) -> None:
         request = self._request()
         request["competitor_analysis"]["candidates"][0]["market_profile"]["rating"] = 5.1
+        self._refresh_attestation(request)
         result = run.run(request, defaults=self.defaults)
 
         with self.assertRaisesRegex(

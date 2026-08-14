@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 import unittest
@@ -17,7 +18,7 @@ import market_evidence_runtime  # noqa: E402
 
 class MarketEvidenceRuntimeTests(unittest.TestCase):
     def test_ego_missing_on_a_mac_gives_an_install_action_not_a_hidden_fallback(self) -> None:
-        with patch.object(market_evidence_runtime.platform, "system", return_value="Darwin"), patch.object(
+        with patch.dict(os.environ, {"MARKET_EVIDENCE_RECEIPT_HMAC_KEY": "x" * 32}, clear=True), patch.object(market_evidence_runtime.platform, "system", return_value="Darwin"), patch.object(
             market_evidence_runtime.shutil, "which", return_value=None
         ):
             result = market_evidence_runtime.check_engine("ego-browser")
@@ -28,7 +29,7 @@ class MarketEvidenceRuntimeTests(unittest.TestCase):
     def test_kimi_requires_both_adapter_and_connected_browser(self) -> None:
         adapter = {"state": "action_required", "summary": "adapter missing", "install_hint": "install adapter"}
         daemon = {"state": "ready", "summary": "browser ready"}
-        with patch.object(market_evidence_runtime, "_configured_command", return_value=adapter), patch.object(
+        with patch.dict(os.environ, {"MARKET_EVIDENCE_RECEIPT_HMAC_KEY": "x" * 32}, clear=True), patch.object(market_evidence_runtime, "_configured_command", return_value=adapter), patch.object(
             market_evidence_runtime, "_kimi_daemon_status", return_value=daemon
         ):
             result = market_evidence_runtime.check_engine("kimi-webbridge")
@@ -36,6 +37,16 @@ class MarketEvidenceRuntimeTests(unittest.TestCase):
         self.assertEqual("action_required", result["state"])
         self.assertEqual(adapter, result["details"]["adapter"])
         self.assertEqual(daemon, result["details"]["daemon"])
+
+    def test_preflight_blocks_an_installed_engine_when_host_attestation_is_missing(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            market_evidence_runtime, "_playwright_status", return_value={"state": "ready", "summary": "browser ready"}
+        ):
+            result = market_evidence_runtime.check_engine("playwright")
+
+        self.assertEqual("action_required", result["state"])
+        self.assertIn("attestation", result["summary"])
+        self.assertIn("MARKET_EVIDENCE_RECEIPT_HMAC_KEY", result["install_hint"])
 
     def test_preflight_is_machine_readable_for_hermes(self) -> None:
         with patch.object(

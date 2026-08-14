@@ -38,6 +38,7 @@ CTRIP_DOM_PARSER = PACKAGE_ROOT / "scripts" / "ctrip_dom_parser.py"
 CTRIP_DOM_REGISTRY = COLLECTOR_ROOT / "ctrip_element_registry.json"
 SCRAPLING_REQUIREMENTS = COLLECTOR_ROOT / "requirements-scrapling.txt"
 LOCAL_PARSER_PYTHON = COLLECTOR_ROOT / ".venv" / "bin" / "python"
+RECEIPT_ATTESTATION_ENVIRONMENT = "MARKET_EVIDENCE_RECEIPT_HMAC_KEY"
 
 
 def _status(
@@ -53,6 +54,43 @@ def _status(
     if details:
         result["details"] = details
     return result
+
+
+def _receipt_attestation_status() -> dict[str, Any]:
+    """Check the host-owned receipt key without ever exposing its value."""
+
+    configured = os.environ.get(RECEIPT_ATTESTATION_ENVIRONMENT, "").encode("utf-8")
+    if len(configured) >= 32:
+        return _status(
+            "ready",
+            "Host receipt attestation key is configured.",
+            details={"environment_variable": RECEIPT_ATTESTATION_ENVIRONMENT},
+        )
+    return _status(
+        "action_required",
+        "Host receipt attestation key is missing or too short; unsigned market evidence is rejected.",
+        install_hint=(
+            f"Set {RECEIPT_ATTESTATION_ENVIRONMENT} to a host-managed random value of at least 32 bytes "
+            "in Hermes/macOS service configuration, then restart the host. Never put this key in request JSON or Git."
+        ),
+        details={"environment_variable": RECEIPT_ATTESTATION_ENVIRONMENT},
+    )
+
+
+def _with_receipt_attestation(engine_status: dict[str, Any]) -> dict[str, Any]:
+    attestation = _receipt_attestation_status()
+    details = dict(engine_status.get("details") or {})
+    details["receipt_attestation"] = attestation
+    if engine_status["state"] != "ready":
+        return {**engine_status, "details": details}
+    if attestation["state"] != "ready":
+        return _status(
+            "action_required",
+            "Page collector runtime is installed, but receipt attestation cannot be emitted.",
+            install_hint=attestation.get("install_hint"),
+            details={"engine": engine_status, "receipt_attestation": attestation},
+        )
+    return {**engine_status, "details": details}
 
 
 def _configured_command(engine: str) -> dict[str, Any]:
@@ -421,20 +459,23 @@ def check_engine(engine: str) -> dict[str, Any]:
     """Return a machine-readable readiness result without changing host state."""
 
     if engine == "ego-browser":
-        return _ego_status()
-    if engine == "playwright":
-        return _playwright_status()
-    if engine == "ctrip-live-rates":
-        return _ctrip_live_rates_status()
-    if engine == "kimi-webbridge":
+        result = _ego_status()
+    elif engine == "playwright":
+        result = _playwright_status()
+    elif engine == "ctrip-live-rates":
+        result = _ctrip_live_rates_status()
+    elif engine == "kimi-webbridge":
         adapter = _configured_command(engine)
         daemon = _kimi_daemon_status()
         if adapter["state"] == "ready" and daemon["state"] == "ready":
-            return _status("ready", "Kimi WebBridge adapter and browser connection are ready.", details={"adapter": adapter, "daemon": daemon})
-        return _status("action_required", "Kimi WebBridge cannot collect until both adapter and browser connection are ready.", install_hint=adapter.get("install_hint") or daemon.get("install_hint"), details={"adapter": adapter, "daemon": daemon})
-    if engine in EXTERNAL_ENGINE_ENVIRONMENT:
-        return _configured_command(engine)
-    return _status("failed", f"Unknown page collection engine: {engine}")
+            result = _status("ready", "Kimi WebBridge adapter and browser connection are ready.", details={"adapter": adapter, "daemon": daemon})
+        else:
+            result = _status("action_required", "Kimi WebBridge cannot collect until both adapter and browser connection are ready.", install_hint=adapter.get("install_hint") or daemon.get("install_hint"), details={"adapter": adapter, "daemon": daemon})
+    elif engine in EXTERNAL_ENGINE_ENVIRONMENT:
+        result = _configured_command(engine)
+    else:
+        result = _status("failed", f"Unknown page collection engine: {engine}")
+    return _with_receipt_attestation(result)
 
 
 def preflight(engines: list[str]) -> dict[str, Any]:

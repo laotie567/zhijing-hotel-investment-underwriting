@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
@@ -18,6 +19,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import run  # noqa: E402
+import market_evidence_contract  # noqa: E402
+
+
+ATTESTATION_KEY = "market-evidence-test-key-with-at-least-32-bytes"
 
 
 def competitor_input() -> dict:
@@ -57,37 +62,44 @@ def competitor_input() -> dict:
                             "guests": 2,
                             "currency": "CNY",
                         },
-                        "source_url": "https://m.ctrip.com/html5/hotel/hoteldetail/example.html",
+                        "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
                         "observed_at": "2026-08-12T09:10:00+08:00",
                     }
                 ],
-                "pricing_observations": (
-                    [
-                        {
-                            "room_type": "双人电竞房",
-                            "room_type_provider_id": f"P-{index}:room-2",
-                            "price_type": "P2",
-                            "display_price": price,
+                "pricing_observations": [
+                    {
+                        "room_type": "双人电竞房",
+                        "room_type_provider_id": f"P-{index}:room-2",
+                        "price_type": "P2",
+                        "display_price": price,
+                        "currency": "CNY",
+                        "availability": "available",
+                        "tax_included": True,
+                        "cancellation_policy": "免费取消",
+                        "pricing_context": {
+                            "check_in_date": "2026-08-26",
+                            "nights": 1,
+                            "guests": 2,
                             "currency": "CNY",
-                            "availability": "available",
-                            "pricing_context": {
-                                "check_in_date": "2026-08-26",
-                                "nights": 1,
-                                "guests": 2,
-                                "currency": "CNY",
-                            },
-                            "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
-                            "observed_at": "2026-08-12T09:10:00+08:00",
-                            "network_verified": True,
-                            "dom_verified": True,
-                            "price_match": True,
-                            "adr_eligible": False,
-                            "qualification_gaps": ["tax_scope_unknown"],
-                        }
-                    ]
-                    if index == 1
-                    else []
-                ),
+                        },
+                        "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                        "observed_at": "2026-08-12T09:10:00+08:00",
+                        "network_verified": True,
+                        "dom_verified": True,
+                        "price_match": True,
+                        "adr_eligible": True,
+                        "qualification_gaps": [],
+                    }
+                ],
+                "benchmark_selected": index == 1,
+                "room_type_evidence": [
+                    {
+                        "room_type": "双人电竞房",
+                        "room_type_provider_id": f"P-{index}:room-type-1",
+                        "source_url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1",
+                        "observed_at": "2026-08-12T09:10:00+08:00",
+                    }
+                ],
             }
         )
     return {
@@ -147,13 +159,25 @@ def collected_request(project_input: dict, competitors: dict, report: dict | Non
         ).encode("utf-8")
     ).hexdigest()
     center = competitors["confirmed_location"]
+    selected = [
+        candidate for candidate in candidates if candidate.get("benchmark_selected") is True
+    ]
+    report_value = report or {"candidate_media": []}
+    image_ids = {
+        item.get("provider_place_id")
+        for item in report_value.get("candidate_media", [])
+        if isinstance(item, dict) and item.get("images")
+    }
+    images_complete = {
+        candidate["provider_place_id"] for candidate in selected
+    }.issubset(image_ids)
     receipt = {
         "contract_version": "market-evidence-collection/v2",
-        "status": "partial",
+        "status": "complete" if images_complete else "partial",
         "collector": {
-            "engine": "ego-browser",
+            "engine": "ctrip-live-rates",
             "engine_version": "test",
-            "source_profile": "ctrip-hotel-v1",
+            "source_profile": "ctrip-live-rates-v1",
             "started_at": timestamp,
             "finished_at": timestamp,
             "page_sources": [{"url": "https://hotels.ctrip.com/hotels/detail/?hotelId=1", "status": 200}],
@@ -161,14 +185,17 @@ def collected_request(project_input: dict, competitors: dict, report: dict | Non
         "target_resolution": center,
         "coverage": {
             "candidates": {"status": "complete", "observed_count": len(candidates)},
-            "benchmark_set": {"status": "complete", "observed_count": len(candidates)},
-            "room_types": {"status": "complete", "observed_count": len(candidates)},
-            "images": {"status": "complete", "observed_count": len(candidates)},
-            "pricing": {"status": "partial", "observed_count": 0},
+            "benchmark_set": {"status": "complete", "observed_count": len(selected)},
+            "room_types": {"status": "complete", "observed_count": len(selected)},
+            "images": {
+                "status": "complete" if images_complete else "partial",
+                "observed_count": len(image_ids & {candidate["provider_place_id"] for candidate in selected}),
+            },
+            "pricing": {"status": "complete", "observed_count": len(selected)},
         },
-        "collection_gaps": ["测试回执：严格报价仍待补齐"],
+        "collection_gaps": [] if images_complete else ["测试回执：选中标杆视觉证据仍待补齐"],
         "competitor_analysis": competitors,
-        "competitor_report": report or {"candidate_media": []},
+        "competitor_report": report_value,
         "spatial_collection": {
             "status": "complete",
             "source_engine": "playwright",
@@ -176,9 +203,13 @@ def collected_request(project_input: dict, competitors: dict, report: dict | Non
             "center": center,
             "candidate_count": len(candidates),
             "candidate_ids_sha256": candidate_ids_sha256,
+            "candidate_snapshot_sha256": market_evidence_contract._candidate_snapshot_sha256(candidates),
         },
     }
-    request = {"project_input": project_input, "market_evidence": receipt}
+    request = {
+        "project_input": project_input,
+        "market_evidence": market_evidence_contract.attest_collection_result(receipt),
+    }
     if report is not None:
         request["competitor_report"] = report
     return request
@@ -186,6 +217,12 @@ def collected_request(project_input: dict, competitors: dict, report: dict | Non
 
 class SkillRunTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._attestation_environment = patch.dict(
+            os.environ,
+            {"MARKET_EVIDENCE_RECEIPT_HMAC_KEY": ATTESTATION_KEY},
+        )
+        self._attestation_environment.start()
+        self.addCleanup(self._attestation_environment.stop)
         self.project_input = json.loads(
             (ROOT / "references" / "sample-predeal-hotel.json").read_text(encoding="utf-8")
         )
@@ -193,12 +230,22 @@ class SkillRunTests(unittest.TestCase):
             (ROOT / "references" / "benchmark-defaults.json").read_text(encoding="utf-8")
         )
 
+    def _refresh_attestation(self, request: dict) -> None:
+        receipt = request["market_evidence"]
+        receipt.pop("attestation", None)
+        if "competitor_analysis" in request:
+            receipt["competitor_analysis"] = request["competitor_analysis"]
+        if "competitor_report" in request:
+            receipt["competitor_report"] = request["competitor_report"]
+        request["market_evidence"] = market_evidence_contract.attest_collection_result(receipt)
+
     def test_runs_mandatory_2km_analysis_and_financial_calculation_from_one_request(self) -> None:
         result = run.run(
             collected_request(self.project_input, competitor_input()), defaults=self.defaults
         )
 
-        self.assertEqual("ok", result["status"])
+        self.assertEqual("ready_for_review", result["status"])
+        self.assertEqual("ok", result["execution_status"])
         self.assertEqual("ready_for_review", result["workflow"]["status"])
         self.assertEqual("complete", result["competitor_analysis"]["status"])
         self.assertEqual(3, result["competitor_analysis"]["formal_competitor_count"])
@@ -364,7 +411,7 @@ class SkillRunTests(unittest.TestCase):
         self.assertNotIn('src="http', rendered)
         self.assertIn("公开房图显示暖色木饰面", rendered)
         self.assertIn("携程页面价格观察", rendered)
-        self.assertIn("仅供展示：tax_scope_unknown", rendered)
+        self.assertIn("可计入 ADR", rendered)
         self.assertIn("2026-08-26", rendered)
         self.assertIn("<h2>3. 视觉竞品对标</h2>", rendered)
         self.assertIn('<article class="visual-card">', rendered)

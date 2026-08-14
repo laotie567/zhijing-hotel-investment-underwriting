@@ -9,12 +9,12 @@
 | 区块 | 用途 | 权威来源 |
 |---|---|---|
 | 页面采集请求 | 地址、2km范围、房态报价口径与必需证据维度 | 宿主 Agent / 用户确认 |
-| 页面采集回执 | 引擎、Profile、页面 URL/HTTP 状态、采集时间、全量候选/标杆集/房型/图片/报价覆盖度 | Playwright、Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl 或 OpenCLI 的显式 Profile |
+| 页面采集回执 | 当前宿主 HMAC 证明、引擎、Profile、页面 URL/真实 HTTP 状态（或明确未观察）、采集时间、全量候选/标杆集/房型/图片/报价覆盖度 | Playwright、Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl 或 OpenCLI 的显式 Profile |
 | `project_input` | 合同、房型、收入、成本和财务假设 | 项目团队、合同、报价、经确认的经营资料 |
 | `competitor_analysis.confirmed_location` | 2km 分析中心 | 已授权地图能力 |
 | `competitor_analysis.candidates` | 电竞竞品候选、页面房型观察与报价观察 | 已授权地图/证据采集或人工核验 |
 | `competitor_analysis.collection_status` | 候选集是否已完成定义内的采集 | 执行采集的宿主 |
-| `spatial_collection` / OTA 请求的 `candidate_pool` | 地图阶段完成的精确 2km 候选集合（中心、来源 Profile、数量及排序地点 ID SHA-256） | 地图 Profile；OTA Profile 只能原样回传 |
+| `spatial_collection` / OTA 请求的 `candidate_pool` | 地图阶段完成的精确 2km 候选集合（中心、来源 Profile、数量、排序地点 ID SHA-256 及不可变候选事实 SHA-256） | 地图 Profile；OTA Profile 只能原样回传 |
 | `competitor_analysis.pricing_context` | 同批报价的入住日期、晚数、人数和币种 | 已授权报价采集或人工核验 |
 | `competitor_analysis.candidates[].market_profile` | 可选历史市场调研事实：等级、装修、房量、设施、评分等；仅用于交付展示 | 已授权公开资料或人工核验 |
 | `competitor_report` | 可选的竞品装修观察、图片和报告标题；用于 HTML 和 Bitable 的视觉对标展示 | 已授权公开资料或人工核验 |
@@ -27,6 +27,7 @@
 `scripts/market_evidence_contract.py` 是页面采集的权威输入校验。输出必须包含：
 
 - `collector.engine`（仅 `playwright`、`ego-browser`、`ctrip-live-rates`、`kimi-webbridge`、`crawl4ai`、`xcrawl` 或 `opencli`）、引擎版本、Profile、开始/结束时间和实际页面/图片 URL 的 HTTP 回执；
+- `attestation`：当前宿主以 `MARKET_EVIDENCE_RECEIPT_HMAC_KEY` 签发的 HMAC；Skill 会拒绝未签名、篡改或不同宿主密钥的回执。浏览器只控制标签而未得到响应对象时，页面来源必须写 `status: null` 与 `status_observed: false`，不能猜测 200/599；
 - 已确认的 `target_resolution`，或明确的歧义/失败；不能以名称相近自动替换物业；
 - `candidates`、`benchmark_set`、`room_types`、`images`、`pricing` 五项独立覆盖度；
 - 对 OTA Profile：已完成的 `candidate_pool`，以及结果中与其逐字相同的 `spatial_collection`；`collect_market_evidence.py` 还会校验返回的引擎、Profile 和中心点与请求一致；
@@ -72,6 +73,7 @@ Skill 使用未舍入 Haversine 距离判断 `0 <= distance_meters <= 2000`。�
 - `competitor_analysis`：候选数、正式竞品、排除原因、已标准化的 `pricing_context`、按机位的 ADR 参考及缺失项；每个机位结果含计入样本数和 `low_confidence_excluded_property_count`。未满足完整采集、统一报价条件或三家中/高置信度样本时，所有聚合 ADR 字段均为 `null`；候选原始报价仍保留以供补证；
 - `financial_result`：原有确定性财务输出，并附带与顶层一致的 `conclusion_scope`。`base_case.jwl`、`owner_incremental`、`owner_fully_loaded`（以及已启用时的 `owner_economic_incremental`）均含 `first_year_average_monthly_operating_net_cashflow`、`static_payback_months`、`static_payback_months_rounded_up`、`discounted_payback_months` 与 `discounted_payback_months_rounded_up`；
 - `workflow`：`ready_for_review`（空间竞品池已完成）或 `pre_evaluation_only`（空间证据未完成），以及不自动写入财务 ADR 的说明；OTA 的 `partial` 仍会在 conditions 中保留，并令相应机位 ADR 为空；
+- 顶层 `status`：与 `workflow.status` 相同的业务状态；独立的 `execution_status=ok` 只表示程序成功执行，不能被误读为投决就绪；
 - `conclusion_scope`：宿主必须读取的整体结论范围；只有 2km 空间证据未完成时为 `pre_evaluation_only`；
 - `input_sha256`、`defaults_sha256` 和 `skill_version`：轻量追溯字段；后者来自发布包内的 `VERSION`。
 
@@ -81,7 +83,7 @@ Skill 使用未舍入 Haversine 距离判断 `0 <= distance_meters <= 2000`。�
 
 不要将竞品建议自动写入 `project_input`。由业务审核人明确选择 ADR/OCC/房型假设后再重新运行。
 
-`static_payback_months` 沿用历史投资表“回款周期/月”口径：一次性初投 ÷ 首年平均月经营净现金，不含后续设备重置和末期残值。`*_rounded_up` 是给业务交付的保守整月数；原始月数保留用于审计。`discounted_payback_months` 只将既有年度折现持续回收期按 12 个月/年呈现，仍以其年度现金流、重置和折现口径为准。
+`static_payback_months` 采用当前项目约定的“回款周期/月”口径：一次性初投 ÷ 首年平均月经营净现金，不含后续设备重置和末期残值。`*_rounded_up` 是给业务交付的保守整月数；原始月数保留用于审计。该实现保留了历史工作簿的字段语义，但并非对任何旧 Excel 公式的独立复原或审计。`discounted_payback_months` 只将既有年度折现持续回收期按 12 个月/年呈现，仍以其年度现金流、重置和折现口径为准。
 
 ## 不属于该契约的内容
 

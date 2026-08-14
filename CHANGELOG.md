@@ -1,5 +1,21 @@
 # 变更记录
 
+## 1.2.0 - 2026-08-14
+
+### Security and evidence integrity
+
+- 市场采集回执新增宿主 HMAC 证明；未签名、被篡改或与当前部署主机密钥不匹配的回执不能进入 run.py。预检会明确提示管理员配置 MARKET_EVIDENCE_RECEIPT_HMAC_KEY，不输出密钥。
+- 地图到 OTA 空间交接除候选 ID 外新增不可变候选快照 SHA-256，坐标、分类、运营状态或来源被替换时即使数量和 ID 不变也会拒绝。
+- P2 严格报价仅接受真实单晚字段；总价字段不再可作 ADR。Network/DOM 的税费与取消政策必须同时存在且一致；图片下载仅允许批准 CDN、HTTPS、无重定向、限时限量读取。
+
+### Collection and delivery
+
+- 360-map-v1 采用住宿发现词组建立 2km 候选池，普通住宿含电竞房的候选保留为可审计的 incidental，而非被名称或类别过滤静默删除；深调仍最多 8 家主营电竞标杆。
+- 房型、图片、报价覆盖度改为逐个已选标杆核验；不再以“任一候选有一条证据”声称完整。
+- P2 Scrapling 解析器只接收已观察到的原始 Ctrip 房型卡 outerHTML，移除自构造的语义 DOM 与自适应持久状态；布局漂移失败关闭。
+- Bitable manifest 升为 1.3：将载荷写入、市场证据、ADR证据和投决范围分列。附件读回最多更新为“写入已核验”，不再使用“可交付”暗示完整投决。
+- 顶层 Skill 输出 status 现在等于实际 ready_for_review 或 pre_evaluation_only；新增独立的 execution_status=ok 表示程序执行成功。
+
 ## 1.1.1 - 2026-08-14
 
 ### Fixed

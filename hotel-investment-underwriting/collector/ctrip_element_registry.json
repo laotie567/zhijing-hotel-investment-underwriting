@@ -3,53 +3,49 @@
   "source_profile": "ctrip-live-rates-v1",
   "roles": {
     "room_container": {
-      "semantic_id": "ctrip.room_container",
-      "primary_selectors": ["[data-testid='hotel-room-list']"],
-      "fallback_selectors": ["section.hotel-room-list", "[data-role='hotel-room-list']"],
-      "adaptive_identifier": "ctrip.room_container",
-      "adaptive_allowed": true
+      "semantic_id": "ctrip.captured_room_cards",
+      "primary_selectors": ["[data-ctrip-captured-panel='true']"],
+      "fallback_selectors": []
     },
     "room_card": {
       "semantic_id": "ctrip.room_card",
-      "primary_selectors": ["[data-room-id]"],
-      "fallback_selectors": ["[data-room-ref]", "[data-ctrip-room-card]"],
-      "adaptive_allowed": false
+      "primary_selectors": ["[class*='commonRoomCard']"],
+      "fallback_selectors": []
     },
     "room_name": {
       "semantic_id": "ctrip.room_name",
-      "primary_selectors": ["[data-testid='room-name']"],
-      "fallback_selectors": ["[data-role='room-name']"]
+      "primary_selectors": ["[class*='commonRoomCard-title']"],
+      "fallback_selectors": ["[class*='roomName']", "[class*='room-name']"]
     },
     "rate_plan": {
       "semantic_id": "ctrip.rate_plan",
-      "primary_selectors": ["[data-testid='rate-plan']"],
-      "fallback_selectors": ["[data-role='rate-plan']"]
+      "primary_selectors": ["[class*='ratePlan']"],
+      "fallback_selectors": []
     },
     "price": {
       "semantic_id": "ctrip.price",
-      "primary_selectors": ["[data-testid='room-price']"],
-      "fallback_selectors": ["[data-role='room-price']"],
-      "adaptive_allowed": false
+      "primary_selectors": ["[class*='price']"],
+      "fallback_selectors": []
     },
     "availability": {
       "semantic_id": "ctrip.availability",
-      "primary_selectors": ["[data-testid='availability']"],
-      "fallback_selectors": ["[data-role='availability']"]
+      "primary_selectors": ["[class*='book']"],
+      "fallback_selectors": []
     },
     "tax_scope": {
       "semantic_id": "ctrip.tax_scope",
-      "primary_selectors": ["[data-testid='tax-scope']"],
-      "fallback_selectors": ["[data-role='tax-scope']"]
+      "primary_selectors": ["[class*='tax']"],
+      "fallback_selectors": []
     },
     "cancellation": {
       "semantic_id": "ctrip.cancellation",
-      "primary_selectors": ["[data-testid='cancellation']"],
-      "fallback_selectors": ["[data-role='cancellation']"]
+      "primary_selectors": ["[class*='cancel']"],
+      "fallback_selectors": []
     },
     "workstations": {
       "semantic_id": "ctrip.workstations",
-      "primary_selectors": ["[data-testid='workstations']"],
-      "fallback_selectors": ["[data-role='workstations']"]
+      "primary_selectors": ["[class*='room']"],
+      "fallback_selectors": []
     }
   }
 }

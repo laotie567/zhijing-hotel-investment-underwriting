@@ -60,14 +60,15 @@
       "description": "Immutable proof that an OTA Profile received the exact complete 2km map population.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "source_engine", "source_profile", "center", "candidate_count", "candidate_ids_sha256"],
+      "required": ["status", "source_engine", "source_profile", "center", "candidate_count", "candidate_ids_sha256", "candidate_snapshot_sha256"],
       "properties": {
         "status": {"const": "complete"},
         "source_engine": {"enum": ["playwright", "ego-browser", "kimi-webbridge", "crawl4ai", "xcrawl", "opencli"]},
         "source_profile": {"const": "360-map-v1"},
         "center": {"$ref": "skill-request.schema.json#/properties/competitor_analysis/properties/confirmed_location"},
         "candidate_count": {"type": "integer", "minimum": 0, "maximum": 1000},
-        "candidate_ids_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "candidate_ids_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "candidate_snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
     "pricing_context": {

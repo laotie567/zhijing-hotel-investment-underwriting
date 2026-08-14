@@ -29,6 +29,7 @@ secrets/
 
 # Generated test artifacts and logs
 hotel-investment-underwriting-test-results/
+.feishu-e2e-write.*/
 logs/
 *.log
 *.tmp

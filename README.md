@@ -1,6 +1,6 @@
 # 智竞未来电竞酒店投测 Skill
 
-当前开发版本：`1.1.1`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统或项目数据库。它包含一个无界面的、可替换引擎的页面市场证据采集工具。
+当前开发版本：`1.2.0`。这是一个用于签约前判断的单一生产 Skill，不是独立 App、审批系统或项目数据库。它包含一个无界面的、可替换引擎的页面市场证据采集工具。
 
 它做三件彼此分离的事：
 
@@ -27,7 +27,8 @@ flowchart LR
 ## 核心规则
 
 - 只接受确认的 GCJ-02 中心点和同坐标系候选点；Skill 自行计算 0–2,000 米 Haversine 距离。
-- 页面证据采集器必须先完成全量 2km 候选，再对明确价格/视觉标杆采集房型、图片和报价；地图到 OTA 的候选池以中心、引擎/Profile、数量和 provider-place-ID 指纹严格绑定。携程 P2 还要通过包内离线 Scrapling DOM 解析与 Network 一致性校验。回执标明所用引擎、Profile、每个页面来源 URL/HTTP 状态、采集时间和五项覆盖度。引擎不可用或页面结构变更时必须显式失败/待补，不能以模型臆测补齐。
+- 地图采集器以住宿发现词组穷尽 2km 住宿候选，保留主营电竞与“普通住宿含电竞房”两类，后者可审计地排除而不是静默丢弃；最多从完整池选择 8 家标杆深调。地图到 OTA 的候选池以中心、引擎/Profile、数量、ID 指纹和不可变候选快照严格绑定。携程 P2 还要通过包内离线 Scrapling 对原始房型卡 DOM 的解析与 Network 一致性校验。回执标明所用引擎、Profile、页面 URL、真实 HTTP 状态或明确的“状态未观察”、采集时间和五项覆盖度。引擎不可用或页面结构变更时必须显式失败/待补，不能以模型臆测补齐。
+- market_evidence 必须带宿主 HMAC 证明；run.py 拒绝未签名、被篡改或来自不同部署主机的回执。密钥只由部署宿主通过 MARKET_EVIDENCE_RECEIPT_HMAC_KEY 注入，绝不写入请求、报告或 Git。
 - 正式竞品必须是营业中的主营电竞住宿，候选与中心点使用同一地图 `provider`，并有完整来源记录。
 - 仅在采集完整、同一 `pricing_context`（入住日期、晚数、人数、CNY）下，同机位至少有三家独立的中/高置信度正式竞品时，才输出按 10 元取整的中位数 ADR 参考；低置信度来源仍展示，但不计入 ADR 样本。
 - 竞品建议不会自动写入财务输入；由分析人员显式选择收入假设。
@@ -50,7 +51,7 @@ python3 hotel-investment-underwriting/scripts/collect_market_evidence.py \
 python3 hotel-investment-underwriting/scripts/run.py \
   --input /path/to/skill-request.json \
   --defaults hotel-investment-underwriting/references/benchmark-defaults.json \
-  --format feishu
+  --format bitable
 ```
 
 生成可离线查看的竞品调研报告：
@@ -73,7 +74,7 @@ python3 hotel-investment-underwriting/scripts/run.py \
   --format bitable > /path/to/bitable-delivery.json
 ```
 
-该 JSON 是一个无凭证的写入清单：授权的宿主将它映射到八张标准表（项目总表、输入、成本、年度现金流、情景敏感性、房型、2km 竞品、报价与视觉证据）。它没有飞书 API 调用、公式、远程图片抓取或项目状态；相同输入指纹可幂等更新，变更输入会形成新的项目运行。写入前必须读取 `delivery_gate`：资料不齐时三张专题表会写入可见“待补”记录，项目总表标记“待补证据”；资料齐全时也先标记“待写入核验”，只有宿主上传并读回附件后才能改为“可交付”。详情见 [bitable-delivery.md](hotel-investment-underwriting/references/bitable-delivery.md)。
+该 JSON 是一个无凭证的写入清单：授权的宿主将它映射到八张标准表（项目总表、输入、成本、年度现金流、情景敏感性、房型、2km 竞品、报价与视觉证据）。它没有飞书 API 调用、公式、远程图片抓取或项目状态；相同输入指纹可幂等更新，变更输入会形成新的项目运行。写入前必须读取 delivery_gate：它分别给出载荷写入、市场证据、ADR 证据和投决范围。附件读回只能把交付载荷状态从“待写入核验”改为“写入已核验”，绝不能把部分市场/ADR 证据或预评估提升成投决结论。详情见 [bitable-delivery.md](hotel-investment-underwriting/references/bitable-delivery.md)。
 
 请求契约见 [skill-request.schema.json](hotel-investment-underwriting/schemas/skill-request.schema.json)，财务字段见 [input-schema.md](hotel-investment-underwriting/references/input-schema.md)。
 

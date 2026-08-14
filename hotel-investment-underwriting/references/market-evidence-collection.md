@@ -4,6 +4,16 @@
 它以 `market-evidence-collection/v2` 作为正式业务契约：任何 Agent 平台只需
 调用 CLI 或本地 HTTP，不依赖 Codex Computer Use。
 
+## 信任边界
+
+采集器结构校验通过后，必须由部署宿主以环境变量
+MARKET_EVIDENCE_RECEIPT_HMAC_KEY 签发 HMAC 回执。run.py 只接受当前宿主密钥可验证的
+回执；Agent 不能手写或修改 market_evidence 来注入竞品、图片或 ADR。密钥至少 32 字节，
+只放在 Hermes/macOS 服务配置中，绝不放进 JSON、HTML、飞书清单、日志或 Git。
+
+collector.page_sources 的 status 是实际 HTTP 响应才可写入的值。仅能控制浏览器标签而不能取得
+响应对象时，采集器写入 status=null 与 status_observed=false；不得用 200 或 599 猜测页面状态。
+
 ## 输入
 
 ```json
@@ -39,7 +49,8 @@ GCJ-02 中心点；采集器不能把同名物业猜成精确点位。
 
 默认 Profile 是 `360-map-v1`，以无头 Playwright 打开页面来源，保留每一次
 页面/图片请求的 URL、HTTP 状态和时间。它负责**全量 2km 空间候选**，再从其中按
-公开房图、房型披露、评分/点评信号、距离的固定顺序生成有限的价格/视觉标杆集；标杆
+住宿发现词组（酒店、民宿、客栈、公寓及电竞住宿变体）先建立可审计的候选池；再按
+公开房图、房型披露、评分/点评信号、距离的固定顺序，从主营电竞住宿生成有限的价格/视觉标杆集；标杆
 **最多 8 家**，不要求每家泛候选都有图片或实时价格。安装一次运行时
 后即可供 Hermes、OpenAI Agent 或任意本地进程调用：
 
@@ -79,7 +90,8 @@ Ego Lite、Ui.Vision+OpenCLI、Kimi WebBridge、crawl4ai、xcrawl、OpenCLI 是�
 采集器明确返回未完成的空间候选池，不能产出“全量 2km”结论。
 
 地图结果中的 `spatial_collection` 是二阶段的不可变交接件：包含完整状态、地图引擎/
-Profile、确认中心、全量候选数和按排序 `provider_place_id` 计算的 SHA-256。OTA 请求必须
+Profile、确认中心、全量候选数、按排序 provider-place-ID 的 SHA-256，以及候选不可变事实
+快照的 SHA-256（坐标、分类、运营状态、来源）。OTA 请求必须
 将它原样放入 `candidate_pool`，同时仍携带**全量** `candidate_inventory`；OTA 结果再原样
 回传为 `spatial_collection`。CLI 会拒绝任一引擎、Profile、中心、数量或指纹不一致的回执。
 这避免只传入已选 8 家标杆后，把不完整 2km 集合误称为完整。
@@ -136,13 +148,15 @@ Bridge。OpenCLI 当前一次只能可靠绑定**一个**已连接的 Browser Br
 
 该 Profile 把真实页面所见的 P1/P2/P3 记录为 `pricing_observations`，供 HTML 与飞书
 展示。Ui.Vision 采集后，OpenCLI 只读当前页面的受限房型 DOM 观察；包内 Scrapling
-`ctrip-dom-parser/v1` 离线以 `ctrip-element-registry/v1` 解析它。该解析器不是浏览器或
-第二采集源，不发请求、不读 Cookie，并且解析失败会产生 `DOM_SCHEMA_DRIFT`。只有 P2 同时
+ctrip-dom-parser/v1 离线以 ctrip-element-registry/v1 解析它。该解析器不是浏览器或
+第二采集源，不发请求、不读 Cookie，并且只接收受限的原始房型卡 outerHTML，不接收采集脚本
+重建的语义字段；解析失败会产生 DOM_SCHEMA_DRIFT。只有 P2 同时
 通过这一版本化 DOM 解析、完全相同的报价条件、Network/DOM 价格一致、可订、税费、取消
 政策及机位数时，才另写入严格的 `room_offers` 并可参与 ADR。页面没有回显请求的日期和
 人数时必记 `pricing_context_unverified`，即使 Network/DOM 数字相同也绝不能 ADR-eligible。
-公开图片只从酒店/房型/图库上下文选择，过滤账号头像、Logo 与二维码；所有标杆共用总
-嵌入体积上限 7.5MB，而非每家各自放大。`NO_INVENTORY` 是已完成的
+公开图片只从酒店/房型/图库上下文选择，过滤账号头像、Logo 与二维码；下载仅接受 HTTPS
+批准 CDN、禁止重定向、限时并按声明与流式字节数限制。所有标杆共用总嵌入体积上限 7.5MB，
+而非每家各自放大。NO_INVENTORY 是已完成的
 负向采集结果，不以空表或虚构价格代替；`AUTH_REQUIRED`、`CAPTCHA_REQUIRED`、
 `QUERY_MISMATCH`、`PRICE_MISMATCH`、`NETWORK_SCHEMA_DRIFT` 等以结构化
 `collection_issues` 返回。

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Parse one already-captured Ctrip room-panel HTML fragment offline.
+"""Parse captured, raw Ctrip room-card HTML offline.
 
-This narrow CLI intentionally owns no browser, network request, credential,
-cookie, page navigation or adaptive state by default.  Ui.Vision performs page
-actions and OpenCLI supplies the fragment; this tool only turns that fragment
-into candidates for the existing Network/DOM validator.
+This narrow CLI owns no browser, network request, credential, cookie, page
+navigation or adaptive selector state. Ui.Vision performs page actions and
+OpenCLI supplies bounded *real card outerHTML*; this tool only extracts facts
+for the existing Network/DOM validator.
 """
 
 from __future__ import annotations
@@ -100,12 +100,6 @@ def _require_scrapling() -> Any:
     return Selector
 
 
-def _adaptive_url(source_url: str) -> str:
-    """Use a stable host-scoped key, never the hotel/date-specific page URL."""
-
-    return f"https://{urlparse(source_url).hostname}/ctrip-dom-parser/v1"
-
-
 def _node_text(node: Any, selectors: list[str]) -> str:
     for selector in selectors:
         matches = node.css(selector)
@@ -137,29 +131,16 @@ def _role_selectors(registry: Mapping[str, Any], role: str) -> tuple[list[str], 
     return [str(item) for item in primary], [str(item) for item in fallback]
 
 
-def _single_room_container(
-    page: Any,
-    registry: Mapping[str, Any],
-    *,
-    save_adaptive: bool,
-    enable_adaptive: bool,
-) -> tuple[Any | None, str]:
-    definition = registry["roles"]["room_container"]
+def _single_room_container(page: Any, registry: Mapping[str, Any]) -> tuple[Any | None, str]:
     primary, fallback = _role_selectors(registry, "room_container")
-    identifier = str(definition["adaptive_identifier"])
     for selector in primary:
-        matches = page.css(selector, identifier=identifier, auto_save=save_adaptive)
+        matches = page.css(selector)
         if matches:
             return matches[0], "primary"
     for selector in fallback:
-        matches = page.css(selector, identifier=identifier, auto_save=save_adaptive)
+        matches = page.css(selector)
         if matches:
             return matches[0], "fallback"
-    if enable_adaptive and definition.get("adaptive_allowed"):
-        for selector in primary:
-            matches = page.css(selector, identifier=identifier, adaptive=True)
-            if matches:
-                return matches[0], "adaptive"
     return None, "missing"
 
 
@@ -215,19 +196,41 @@ def _room(card: Any, registry: Mapping[str, Any]) -> dict[str, Any] | None:
         return [*primary, *fallback]
 
     room_id = _text(card.attrib.get("data-room-id") or card.attrib.get("data-room-ref"), 200)
+    card_text = _text(card.text, 1_500)
     room_name = _node_text(card, selectors("room_name"))
+    if not room_name:
+        room_name = next(
+            (
+                line
+                for line in (item.strip() for item in str(card.text or "").splitlines())
+                if "房" in line and not _PRICE.search(line)
+            ),
+            "",
+        )
+        room_name = _text(room_name, 300)
     price_text = _node_text(card, selectors("price"))
     price_attribute = _node_attribute(card, selectors("price"), "data-price")
-    display_price = _price(f"¥{price_attribute}") if price_attribute else _price(price_text)
+    display_price = (
+        _price(f"¥{price_attribute}")
+        if price_attribute
+        else _price(price_text) or _price(card_text)
+    )
     # A rendered DOM block has no trustworthy provider room ID on some Ctrip
     # layouts. The later Network/DOM matcher supplies the provider ID from the
     # network side; inventing one here would make the evidence less reliable.
     if not room_name or display_price is None:
         return None
-    availability_text = _node_attribute(card, selectors("availability"), "data-availability") or _node_text(card, selectors("availability"))
-    tax_text = _node_text(card, selectors("tax_scope"))
+    availability_text = (
+        _node_attribute(card, selectors("availability"), "data-availability")
+        or _node_text(card, selectors("availability"))
+        or card_text
+    )
+    tax_text = _node_text(card, selectors("tax_scope")) or card_text
     cancellation = _node_text(card, selectors("cancellation"))
-    workstation_text = _node_text(card, selectors("workstations"))
+    if not cancellation:
+        matched_cancellation = re.search(r"(?:免费取消|不可取消|取消[^，。\n]{0,80})", card_text)
+        cancellation = matched_cancellation.group(0) if matched_cancellation else ""
+    workstation_text = _node_text(card, selectors("workstations")) or card_text
     workstation_attribute = _node_attribute(card, selectors("workstations"), "data-workstations")
     return {
         "room_id": room_id or None,
@@ -271,30 +274,12 @@ def _context_evidence(page: Any, context: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def parse(value: Mapping[str, Any], *, adaptive_store: str | None, save_adaptive: bool, enable_adaptive: bool) -> dict[str, Any]:
+def parse(value: Mapping[str, Any]) -> dict[str, Any]:
     request = _load_request_text(value)
     registry = _load_registry()
-    if (save_adaptive or enable_adaptive) and not adaptive_store:
-        raise CtripDomParserError("adaptive_store is required when adaptive parsing is requested")
     Selector = _require_scrapling()
-    selector_kwargs: dict[str, Any] = {"url": _adaptive_url(request["source_url"])}
-    if adaptive_store:
-        selector_kwargs.update(
-            {
-                "adaptive": True,
-                "storage_args": {
-                    "storage_file": adaptive_store,
-                    "url": _adaptive_url(request["source_url"]),
-                },
-            }
-        )
-    page = Selector(request["dom_fragment"], **selector_kwargs)
-    container, source = _single_room_container(
-        page,
-        registry,
-        save_adaptive=save_adaptive,
-        enable_adaptive=enable_adaptive,
-    )
+    page = Selector(request["dom_fragment"])
+    container, source = _single_room_container(page, registry)
     rooms = [_room(card, registry) for card in _cards(container, registry)] if container is not None else []
     normalized_rooms = [room for room in rooms if room is not None]
     return {
@@ -304,7 +289,7 @@ def parse(value: Mapping[str, Any], *, adaptive_store: str | None, save_adaptive
         "room_container": {
             "semantic_id": registry["roles"]["room_container"]["semantic_id"],
             "selector_source": source,
-            "adaptive_recovered": source == "adaptive",
+            "adaptive_recovered": False,
         },
         "context_evidence": _context_evidence(page, request["pricing_context"]),
         "rooms": normalized_rooms,
@@ -333,21 +318,13 @@ def _load_request_text_from_json(encoded: str) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Parse one already-captured Ctrip room-panel HTML fragment")
     parser.add_argument("--input", required=True, help="JSON input path or - for stdin")
-    parser.add_argument("--adaptive-store", help="Explicit host-managed SQLite path for Scrapling adaptive metadata")
-    parser.add_argument("--save-adaptive", action="store_true", help="Save the known room-container selector metadata")
-    parser.add_argument("--enable-adaptive", action="store_true", help="Use saved room-container metadata only after primary/fallback selectors fail")
     args = parser.parse_args()
     try:
         if args.input == "-":
             request = _load_request(sys.stdin)
         else:
             request = _load_request_text_from_json(Path(args.input).read_text(encoding="utf-8"))
-        result = parse(
-            request,
-            adaptive_store=args.adaptive_store,
-            save_adaptive=args.save_adaptive,
-            enable_adaptive=args.enable_adaptive,
-        )
+        result = parse(request)
     except (CtripDomParserError, OSError) as exc:
         print(f"ctrip_dom_parser: {exc}", file=sys.stderr)
         return 2

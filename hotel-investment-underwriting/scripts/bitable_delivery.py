@@ -16,9 +16,9 @@ import calculate
 import competitor_report
 
 
-MANIFEST_VERSION = "1.2"
+MANIFEST_VERSION = "1.3"
 BASE_NAME = "智竞酒店投资分析交付"
-_DELIVERY_COMPLETENESS = ("待写入核验", "可交付", "待补证据")
+_DELIVERY_COMPLETENESS = ("待写入核验", "写入已核验", "待补证据")
 _DELIVERY_RECORD_STATUSES = (
     "已提供",
     "待补房型",
@@ -87,8 +87,11 @@ def standard_template() -> dict[str, Any]:
                 _text("项目名称"),
                 _text("资料截至"),
                 _select("结论范围", ("ready_for_review", "pre_evaluation_only")),
-                _select("交付完整性", _DELIVERY_COMPLETENESS),
+                _select("交付载荷状态", _DELIVERY_COMPLETENESS),
                 _text("交付待补项"),
+                _select("市场证据状态", ("complete", "partial", "failed", "not_collected")),
+                _select("ADR证据状态", ("available", "partial", "unavailable", "not_collected")),
+                _select("投决准备状态", ("ready_for_review", "pre_evaluation_only")),
                 _select("决策评级", ("建议合作", "条件性推进", "审慎推进", "不建议合作")),
                 _select("数据置信度", ("high", "medium", "low")),
                 _select("准入状态", ("pass", "conditional", "fail", "not_evaluated")),
@@ -559,15 +562,18 @@ def _main_record(
                 _required_mapping(data.get("metadata", {}), "merged metadata").get("as_of")
             ),
             "结论范围": result.get("conclusion_scope"),
-            "交付完整性": (
+            "交付载荷状态": (
                 "待写入核验"
-                if delivery_gate.get("final_delivery_eligible")
+                if delivery_gate.get("payload_write_eligible")
                 else "待补证据"
             ),
             "交付待补项": (
                 "；".join(str(item) for item in delivery_gate.get("blocking_items", []))
                 or None
             ),
+            "市场证据状态": delivery_gate.get("market_evidence_status"),
+            "ADR证据状态": delivery_gate.get("adr_evidence_status"),
+            "投决准备状态": delivery_gate.get("investment_decision_scope"),
             "决策评级": decision.get("rating"),
             "数据置信度": decision.get("data_confidence"),
             "准入状态": admission.get("status"),
@@ -1198,9 +1204,12 @@ def _evidence_records(
 
 
 def _delivery_gate(
-    records: Mapping[str, list[Mapping[str, Any]]], attachments: list[Mapping[str, Any]]
+    records: Mapping[str, list[Mapping[str, Any]]],
+    attachments: list[Mapping[str, Any]],
+    result: Mapping[str, Any],
+    request: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Expose and preserve visible gaps instead of allowing empty topic tables."""
+    """Report payload write readiness separately from evidence and investment scope."""
 
     required = (
         ("房型配置", "待补房型", "房型配置"),
@@ -1217,20 +1226,46 @@ def _delivery_gate(
             blocking_items.append(label)
         table_status[table] = {
             "record_count": len(rows),
-            "status": "待补证据" if is_blocked else "可交付",
+            "status": "待补证据" if is_blocked else "待写入核验",
             "record_statuses": sorted(set(states)),
         }
-    final_eligible = not blocking_items
+    payload_write_eligible = not blocking_items
+    receipt = request.get("market_evidence")
+    market_evidence_status = (
+        str(receipt.get("status"))
+        if isinstance(receipt, Mapping) and receipt.get("status") in {"complete", "partial", "failed"}
+        else "not_collected"
+    )
+    competitors = result.get("competitor_analysis")
+    pricing = (
+        competitors.get("pricing_by_workstations", [])
+        if isinstance(competitors, Mapping)
+        else []
+    )
+    if market_evidence_status == "not_collected":
+        adr_evidence_status = "not_collected"
+    elif any(isinstance(item, Mapping) and item.get("status") == "available" for item in pricing):
+        adr_evidence_status = "available"
+    elif market_evidence_status == "complete":
+        adr_evidence_status = "unavailable"
+    else:
+        adr_evidence_status = "partial"
+    decision_scope = result.get("conclusion_scope")
+    if decision_scope not in {"ready_for_review", "pre_evaluation_only"}:
+        decision_scope = "pre_evaluation_only"
     return {
-        "status": "可交付" if final_eligible else "待补证据",
-        "final_delivery_eligible": final_eligible,
+        "status": "待写入核验" if payload_write_eligible else "待补证据",
+        "payload_write_eligible": payload_write_eligible,
+        "market_evidence_status": market_evidence_status,
+        "adr_evidence_status": adr_evidence_status,
+        "investment_decision_scope": decision_scope,
         "blocking_items": blocking_items,
         "expected_visual_attachment_count": len(attachments),
         "post_write_completion": {
             "initial_summary_status": (
-                "待写入核验" if final_eligible else "待补证据"
+                "待写入核验" if payload_write_eligible else "待补证据"
             ),
-            "success_summary_status": "可交付",
+            "success_summary_status": "写入已核验",
             "required_readback": (
                 "all_manifest_record_keys_links_and_visual_attachments"
             ),
@@ -1291,8 +1326,20 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     delivery_gate = _required_mapping(manifest.get("delivery_gate"), "manifest.delivery_gate")
     if delivery_gate.get("status") not in _DELIVERY_COMPLETENESS:
         raise BitableDeliveryError("manifest.delivery_gate.status is invalid")
-    if not isinstance(delivery_gate.get("final_delivery_eligible"), bool):
-        raise BitableDeliveryError("manifest.delivery_gate.final_delivery_eligible must be boolean")
+    if not isinstance(delivery_gate.get("payload_write_eligible"), bool):
+        raise BitableDeliveryError("manifest.delivery_gate.payload_write_eligible must be boolean")
+    if delivery_gate.get("market_evidence_status") not in {
+        "complete", "partial", "failed", "not_collected"
+    }:
+        raise BitableDeliveryError("manifest.delivery_gate.market_evidence_status is invalid")
+    if delivery_gate.get("adr_evidence_status") not in {
+        "available", "partial", "unavailable", "not_collected"
+    }:
+        raise BitableDeliveryError("manifest.delivery_gate.adr_evidence_status is invalid")
+    if delivery_gate.get("investment_decision_scope") not in {
+        "ready_for_review", "pre_evaluation_only"
+    }:
+        raise BitableDeliveryError("manifest.delivery_gate.investment_decision_scope is invalid")
     blocking_items = delivery_gate.get("blocking_items")
     if not isinstance(blocking_items, list) or not all(
         isinstance(item, str) for item in blocking_items
@@ -1308,9 +1355,9 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     )
     if completion.get("initial_summary_status") not in _DELIVERY_COMPLETENESS:
         raise BitableDeliveryError("manifest.delivery_gate.post_write_completion.initial_summary_status is invalid")
-    if completion.get("success_summary_status") != "可交付":
+    if completion.get("success_summary_status") != "写入已核验":
         raise BitableDeliveryError("manifest.delivery_gate.post_write_completion.success_summary_status is invalid")
-    if delivery_gate["final_delivery_eligible"] != (delivery_gate["status"] == "可交付"):
+    if delivery_gate["payload_write_eligible"] != (delivery_gate["status"] == "待写入核验"):
         raise BitableDeliveryError("manifest.delivery_gate eligibility/status mismatch")
     if not isinstance(tables, list) or not tables:
         raise BitableDeliveryError("manifest.template.tables must be a non-empty array")
@@ -1368,7 +1415,7 @@ def build_manifest(
         "2km竞品": competitor_rows,
         "竞品报价与视觉证据": evidence_rows,
     }
-    delivery_gate = _delivery_gate(delivery_rows, attachments)
+    delivery_gate = _delivery_gate(delivery_rows, attachments, result, request)
     records: dict[str, list[dict[str, Any]]] = {
         "项目测算总表": [_main_record(result, data, run_id, delivery_gate)],
         "输入参数与来源": _input_records(data, financial, run_id),
@@ -1389,9 +1436,10 @@ def build_manifest(
             "attachment_policy": "upload_only_manifest_data_uri; never_fetch_remote_image_url",
             "link_policy": "create_records_first_then_resolve_logical_links",
             "delivery_completion_policy": (
-                "write visible gap records; begin an eligible manifest as 待写入核验 and "
-                "change the summary to 可交付 only after the host readback verifies all "
-                "required records, links and attachments"
+                "write visible gap records; begin an eligible payload as 待写入核验 and "
+                "change only the payload status to 写入已核验 after host readback verifies "
+                "records, links and attachments. This never promotes market evidence, ADR "
+                "evidence, or investment decision scope."
             ),
         },
         "template": standard_template(),
